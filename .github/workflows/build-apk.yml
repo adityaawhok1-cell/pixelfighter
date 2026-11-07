@@ -1,4 +1,3 @@
-
 name: Build APK
 
 on:
@@ -35,6 +34,45 @@ jobs:
       - name: Landscape orientation
         run: |
           sed -i 's/<activity/<activity android:screenOrientation="sensorLandscape"/' android/app/src/main/AndroidManifest.xml
+
+      - name: Layar penuh (tema)
+        run: |
+          S=android/app/src/main/res/values/styles.xml
+          sed -i 's#<item name="android:background">@null</item>#<item name="android:background">@android:color/black</item>\n        <item name="android:windowFullscreen">true</item>\n        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>#' $S
+          grep -q windowLayoutInDisplayCutoutMode $S || (echo "styles.xml tidak cocok"; cat $S; exit 1)
+
+      - name: Layar penuh (sembunyikan bar sistem)
+        run: |
+          cat > android/app/src/main/java/com/pixelfighter/game/MainActivity.java <<'JAVA'
+          package com.pixelfighter.game;
+
+          import android.os.Bundle;
+          import androidx.core.view.WindowCompat;
+          import androidx.core.view.WindowInsetsCompat;
+          import androidx.core.view.WindowInsetsControllerCompat;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+            @Override
+            public void onCreate(Bundle savedInstanceState) {
+              super.onCreate(savedInstanceState);
+              goImmersive();
+            }
+
+            @Override
+            public void onWindowFocusChanged(boolean hasFocus) {
+              super.onWindowFocusChanged(hasFocus);
+              if (hasFocus) goImmersive();
+            }
+
+            private void goImmersive() {
+              WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+              WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+              c.hide(WindowInsetsCompat.Type.systemBars());
+              c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+          }
+          JAVA
 
       - name: Sync web files
         run: npx cap sync android
