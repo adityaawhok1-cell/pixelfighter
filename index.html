@@ -2001,7 +2001,7 @@ const Input2=Object.assign(Object.create(Input),{edge(a){onEdge2(a)},cnt:{},src:
 const NET={role:null,conn:false,lastF:0,img:null,remote:'',pl:null,busy:false};
 window.__pfdbg=()=>({role:NET.role,conn:NET.conn,vs2p,state,leave:netLeave,inp:Input});
 function netNative(){try{return !!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform())}catch(e){return false}}
-function netPlugin(){if(!NET.pl){try{NET.pl=Capacitor.registerPlugin('Net');NET.pl.addListener('msg',e=>netRecv(e.data));NET.pl.addListener('status',e=>netStatus(e.s))}catch(err){NET.pl=null}}return NET.pl}
+function netPlugin(){if(!NET.pl){try{const C=window.Capacitor;let P;if(typeof C.registerPlugin==='function'){P=C.registerPlugin('Net');P.addListener('msg',e=>netRecv(e.data));P.addListener('status',e=>netStatus(e.s))}else{const call=m=>o=>C.nativePromise('Net',m,o||{});P={startServer:call('startServer'),getIps:call('getIps'),connect:call('connect'),send:call('send'),close:call('close')};C.addListener('Net','msg',e=>netRecv(e&&e.data));C.addListener('Net','status',e=>netStatus(e&&e.s))}NET.pl=P}catch(err){NET.pl=null}}return NET.pl}
 function netSend(m){if(NET.conn&&NET.pl)try{NET.pl.send({data:m})}catch(e){}}
 (function(){const _p=Input.prs,_r=Input.rel;
  Input.prs=function(a){_p.call(this,a);if(NET.role==='client'&&this===Input&&this.cnt[a]===1)netSend('P'+a)};
@@ -2018,10 +2018,10 @@ function netStatus(st){
 }
 function netRecv(m){if(!m)return;const c=m[0],b=m.slice(1);
   if(NET.role==='host'){
-    if(c==='P'){if(G&&G.vs2)Input2.set('net:'+b,[b])}
+    if(c==='A'){netAck()}else if(c==='P'){if(G&&G.vs2)Input2.set('net:'+b,[b])}
     else if(c==='R'){Input2.set('net:'+b,[])}
   }else if(NET.role==='client'){
-    if(c==='F'){const im=new Image();im.onload=()=>{NET.img=im};im.src='data:image/jpeg;base64,'+b}
+    if(c==='F'){const im=new Image();im.onload=()=>{NET.img=im;netSend('A')};im.src='data:image/jpeg;base64,'+b}
     else if(c==='S'){NET.remote=b;netMsg(b==='play'?'':b==='pause'?'HOST MEM-PAUSE':b==='result'?'':'MENUNGGU HOST MEMILIH PETARUNG...')}
   }}
 function netClientEnter(){NET.img=null;state='netplay';for(const n of SCREENS){const el=$('sc-'+n);if(el)el.classList.remove('show')}
@@ -2042,13 +2042,16 @@ async function netJoin(){
   const pl=netPlugin();if(!pl){netInfo('Plugin jaringan tidak ditemukan. Pastikan APK dibuat dengan workflow terbaru.');return}
   LS.set('pf_netip',ip);netInfo('Menyambung ke '+ip+' ...');NET.role='client';
   try{await pl.connect({host:ip,port:8765})}catch(e){NET.role=null;netInfo('Gagal tersambung: '+(e&&e.message||e)+'. Cek IP & pastikan sama-sama di hotspot.')}}
-function netTick(){/* host: kirim frame ~16fps */
+function netTick(){/* host: kirim frame ~30fps, resolusi penuh, kualitas adaptif */
   if(NET.role!=='host'||!NET.conn||!(state==='play'||state==='pause'||state==='result'))return;
-  const n=performance.now();if(n-NET.lastF<62)return;NET.lastF=n;
-  try{const u=canvas.toDataURL('image/jpeg',.5);netSend('F'+u.slice(u.indexOf(',')+1))}catch(e){}}
+  const n=performance.now();if(n-NET.lastF<33)return;if((NET.fly||0)>=3){if(n-NET.lastF<400)return;NET.fly=0;NET.ts=[]}NET.lastF=n;
+  try{if(NET.q==null)NET.q=.8;const u=canvas.toDataURL('image/jpeg',NET.q);NET.fly=(NET.fly||0)+1;(NET.ts||(NET.ts=[])).push(n);netSend('F'+u.slice(u.indexOf(',')+1))}catch(e){}}
+function netAck(){/* host: terima ACK, atur kualitas sesuai kecepatan jaringan */
+  NET.fly=Math.max(0,(NET.fly||0)-1);const t=(NET.ts||[]).shift();
+  if(t!=null){const rtt=performance.now()-t;NET.q=Math.max(.5,Math.min(.85,(NET.q||.8)+(rtt<60?.02:rtt>140?-.05:0)))}}
 function netClientRender(){
   const c=ctx;c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,VW,canvas.height);
-  if(NET.img&&(NET.remote==='play'||NET.remote==='pause'||NET.remote==='result')){c.save();c.translate(VW,canvas.height);c.rotate(Math.PI);try{c.drawImage(NET.img,0,0,VW,canvas.height)}catch(e){}c.restore()}
+  if(NET.img&&(NET.remote==='play'||NET.remote==='pause'||NET.remote==='result')){c.imageSmoothingEnabled=false;try{c.drawImage(NET.img,0,0,VW,canvas.height)}catch(e){}}
   else{c.fillStyle='#0b0b1e';c.fillRect(0,0,VW,canvas.height)}}
 function onEdgeFor(f,inp,a){if(state!=='play'||!G||G.phase!=='fight'||f.ai)return;if(a==='ult'){f.useUltimate();return}if(BTNS[a]){if((a==='lh'||a==='rh')&&inp.held.lh&&inp.held.rh&&!f.slamIntent()&&f.useUltimate())return;f.pressAttack(a)}else f.pressDir(a)}
 function onEdge(a){if(G)onEdgeFor(G.p,Input,a)}
@@ -3411,7 +3414,7 @@ function startMatch(id,train,chosenFoe,story){
   G={sel:id,foeSel:foeId,map:mapPick,crates:mapPick==='port'?makePortCrates():[],p:new Fighter(mine,true),e:new Fighter(foe,false),phase:'intro',introT:0,cT:0,cN:-1,fT:0,time:0,timer:60,round:1,score:[0,0],items:[],proj:[],movers:[],parts:[],shake:0,hitStop:0,cam:0,pop:null,koT:0,itemT:6,rw:null,koWhy:'',confT:0};
   if(mirror){if(lastPick==='me')G.p.co=mirrorCos(COS[id]);else G.e.co=mirrorCos(COS[id])}/* lawan diri sendiri: warna dibedakan */
   if(story){G.story=story;G.sdiff=story.diff}
-  G.vs2=!!vs2p&&!train&&!story;if(G.vs2){G.e.ai=null;G.e.ctl=Input2.held}G.split=!!G.vs2;/* V62: Player 2 menggantikan AI */
+  G.vs2=!!vs2p&&!train&&!story;if(G.vs2){G.e.ai=null;G.e.ctl=Input2.held}G.split=!!G.vs2&&!(NET.role==='host'&&NET.conn);/* V62: Player 2 menggantikan AI */
   Aud.setMode('fight');newRound();
   if(train){G.train=true;G.auto=true;G.dummy='DIAM';G.dist=120;G.keepW=null;G.phase='fight';G.fT=0;G.p.ult=100;trainReset();refreshTrain();toast('MODE LATIHAN')}
   go('play');
@@ -4216,7 +4219,7 @@ function go(s){
   state=s;
   for(const n of SCREENS){const el=$('sc-'+n);if(el)el.classList.toggle('show',n===s)}
   if(s==='chapters'||s==='dialog'||s==='storylog')G=null;
-  document.body.classList.toggle('playing',s==='play');document.body.classList.toggle('twop',!!(G&&G.vs2));document.body.classList.toggle('split',!!(G&&G.split));
+  document.body.classList.toggle('playing',s==='play');document.body.classList.toggle('twop',!!(G&&G.vs2&&NET.role!=='host'));document.body.classList.toggle('split',!!(G&&G.split));
   document.body.classList.toggle('ctlprev',s==='settings'&&returnTo==='pause');
   $('pauseBtn').style.display=s==='play'?'flex':'none';
   $('trainBar').style.display=(s==='play'&&G&&G.train)?'flex':'none';
