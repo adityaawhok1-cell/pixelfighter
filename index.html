@@ -4284,7 +4284,7 @@ function tryLandscape(){
 }
 /* V65: potret HANYA untuk pertarungan 2 pemain (split atas-bawah); menu & mode lain tetap landscape */
 let oriFree=false;
-const portraitOK=()=>!!(G&&G.split&&(state==='play'||state==='pause'));
+const portraitOK=()=>false;/* APK: selalu landscape, 2P split tetap di landscape */
 function syncOrientLock(){
   if(!isTouch)return;const ok=portraitOK();if(ok===oriFree)return;oriFree=ok;
   try{if(ok){if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();
