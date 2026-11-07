@@ -2016,13 +2016,18 @@ const Input2=Object.assign(Object.create(Input),{edge(a){onEdge2(a)},cnt:{},src:
    - Checksum state tiap 30 frame; bila beda -> host memerintahkan "resync" (ronde diulang dari seed baru) pada frame yang sama.
    - RNG gameplay (grand/grnd/grint) terpisah dari RNG efek visual (rand/rnd/rint). */
 const NET_KEYS=['l','r','u','d','lh','rh','lf','rf','ult'],NK=NET_KEYS.length,CMD_PAUSE=512,MASK_ALL=511;
+/* V63 ADAPTIVE INPUT DELAY. Bit 0-8 = tombol, bit 9 = pause, bit 10-14 = perintah "set D" (hanya dari HOST, ikut di aliran input).
+   Karena perintah D ikut di mask frame yang SAMA yang dibaca kedua HP, D baru berlaku tepat di frame Fx yang sama di kedua HP
+   (reliable: ikut mekanisme retransmisi/ACK/reconnect input, tidak butuh pesan terpisah). */
+const NET_DMIN=2,NET_DMAX=24,CMD_D_SHIFT=10,CMD_D_MAX=31,NET_MAXWIN=200,NET_WIN_N=30,NET_HEAD=2,NET_LOW_E=1,NET_HIGH_E=3,NET_CALM_N=4,NET_OUTAGE_MS=1200;
 const NET={role:null,conn:false,pl:null,remote:'',img:null,busy:false,seed:0,ip:'',sid:'',
-  lock:false,mid:0,D:3,frame:0,lrec:{},rrec:{},lThrough:-1,rThrough:-1,peerAck:-1,prev1:0,prev2:0,
+  lock:false,mid:0,D:6,frame:0,lrec:{},rrec:{},lThrough:-1,rThrough:-1,peerAck:-1,prev1:0,prev2:0,
   wantPause:false,pausePending:false,rs:null,chkL:{},chkR:{},desyncs:0,resyncs:0,
-  lastRecv:0,lastSend:0,lastPing:0,rtt:0,rttAvg:0,jit:0,stallAt:0,stalls:0,stallMs:0,
+  lastRecv:0,lastSend:0,lastPing:0,rtt:0,rttAvg:0,jit:0,rttN:0,stallAt:0,stalls:0,stallMs:0,
+  dProp:0,dLastAt:-1,dPendAt:-1,dChanges:0,dLearn:0,pendIn:0,q:null,calm:0,lastStallF:0,lastRaiseF:-9999,lastCall:0,w:{min:99,n:0,stalls:0,stallMs:0,stallMax:0,skip:0},
   peerAway:false,reconnectUntil:0,reconnectNext:0,savedFx:undefined,savedSpeed:undefined,hudAt:0,hudMsg:''};
 window.__pfdbg=()=>({role:NET.role,conn:NET.conn,lock:NET.lock,vs2p,state,seed:NET.seed,rngState:RNG_STATE,frame:NET.frame,D:NET.D,
-  rtt:NET.rttAvg,jit:NET.jit,stalls:NET.stalls,stallMs:NET.stallMs,desyncs:NET.desyncs,resyncs:NET.resyncs,hash:G?simHash():0,
+  rtt:NET.rttAvg,jit:NET.jit,dChanges:NET.dChanges,wMin:NET.w.min,stalls:NET.stalls,stallMs:NET.stallMs,desyncs:NET.desyncs,resyncs:NET.resyncs,hash:G?simHash():0,
   game:G&&{phase:G.phase,p1:G.p&&G.p.hp,p2:G.e&&G.e.hp}});
 function netNative(){try{return !!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform())}catch(e){return false}}
 function netPlugin(){if(!NET.pl){try{const C=window.Capacitor;let P;if(typeof C.registerPlugin==='function'){P=C.registerPlugin('Net');P.addListener('msg',e=>netRecv(e.data));P.addListener('status',e=>netStatus(e.s))}else{const call=m=>o=>C.nativePromise('Net',m,o||{});P={startServer:call('startServer'),getIps:call('getIps'),connect:call('connect'),send:call('send'),close:call('close')};C.addListener('Net','msg',e=>netRecv(e&&e.data));C.addListener('Net','status',e=>netStatus(e&&e.s))}NET.pl=P}catch(err){NET.pl=null}}return NET.pl}
@@ -2061,18 +2066,30 @@ function simHash(){
   h=hmix(h,g.itemT);h=hmix(h,RNG_STATE);h=hstr(h,g.phase);
   return h>>>0;
 }
-function netChooseD(){const one=(NET.rttAvg||60)/2+2*NET.jit+4;return clamp(Math.ceil(one/16.67)+2,3,12)}
+/* D awal pertandingan: satu arah = rtt/2, ditambah 2.5x jitter + 6ms (loop/render), dibulatkan ke frame + 1 frame cadangan.
+   Ping bagus -> D=2 (batas bawah). Kalau ping belum terukur (<4 sampel) mulai dari D sedang; kalau ada D hasil adaptasi
+   pertandingan sebelumnya, pakai yang lebih besar. Setelah itu dikoreksi terus oleh netCtlEval (host). */
+function netChooseD(){
+  let d;
+  if(NET.rttN<4)d=NET.dLearn||6;
+  else{const one=NET.rttAvg/2+2.5*NET.jit+6;d=Math.ceil(one/16.67)+1;if(NET.dLearn)d=Math.max(d,NET.dLearn)}
+  return clamp(d,NET_DMIN,NET_DMAX)}
+function netSettle(){return clamp(Math.ceil((NET.rttAvg||100)/2/16.67)+6,6,24)}
+function netWinReset(skip){const w=NET.w;w.min=99;w.n=0;w.stalls=0;w.stallMs=0;w.stallMax=0;w.skip=skip|0}
+/* dipanggil dari loop saat satu stall selesai. Stall panjang (>1.2s) = putus/pause/tab, bukan sinyal jitter: abaikan. */
+function netNoteStall(ms){if(ms>NET_OUTAGE_MS){netWinReset(netSettle());return}const w=NET.w;w.stalls++;w.stallMs+=ms;if(ms>w.stallMax)w.stallMax=ms}
 function netLockInit(){
   const D=NET.D;NET.lock=true;NET.frame=0;NET.lrec={};NET.rrec={};
   for(let i=0;i<D;i++){NET.lrec[i]=0;NET.rrec[i]=0}
   NET.lThrough=D-1;NET.rThrough=D-1;NET.peerAck=D-1;NET.prev1=0;NET.prev2=0;
   NET.wantPause=false;NET.pausePending=false;NET.rs=null;NET.chkL={};NET.chkR={};
+  NET.dProp=0;NET.dLastAt=-1;NET.dPendAt=-1;NET.pendIn=0;NET.q=null;NET.calm=0;NET.lastStallF=0;NET.lastRaiseF=-9999;NET.dLearn=D;NET.lastCall=performance.now();netWinReset(45);
   NET.stallAt=0;NET.stalls=0;NET.stallMs=0;NET.peerAway=false;NET.reconnectUntil=0;NET.lastRecv=performance.now();NET.lastSend=0;
   NetLocal.clear();Input.clear();Input2.clear();
 }
 function netFlush(){
   if(!NET.lock||!NET.conn)return;
-  let from=NET.peerAck+1;if(NET.lThrough-from+1>40)from=NET.lThrough-39;if(from<0)from=0;
+  let from=NET.peerAck+1;if(NET.lThrough-from+1>NET_MAXWIN)from=NET.lThrough-NET_MAXWIN+1;if(from<0)from=0;
   let s='F'+NET.mid.toString(36)+','+from.toString(36)+','+NET.rThrough.toString(36);
   for(let f=from;f<=NET.lThrough;f++)s+=','+((NET.lrec[f]|0).toString(36));
   NET.lastSend=performance.now();netSend(s);
@@ -2085,26 +2102,74 @@ function netGotFrames(b){
   for(let i=3;i<p.length;i++){const fr=from+i-3;if(fr<=NET.rThrough)continue;const v=parseInt(p[i],36);if(!Number.isFinite(v))return;NET.rrec[fr]=v}
   while(NET.rrec[NET.rThrough+1]!==undefined)NET.rThrough++;
 }
+/* Tulis input lokal untuk frame F+D (D = input delay SAAT INI). Bila D naik, celah diisi hold (tanpa lubang);
+   bila D turun, penulisan ditahan beberapa frame dan tombol yang baru ditekan selama itu digabung (tap tidak hilang). */
+function netPushLocal(F){
+  const D=NET.D,tgt=F+D;
+  if(NET.lThrough<tgt){
+    const mb=netLocalMask()&MASK_ALL|NET.pendIn;NET.pendIn=0;
+    for(let f=NET.lThrough+1;f<tgt;f++)NET.lrec[f]=mb;
+    let m=mb;
+    if(NET.wantPause){m|=CMD_PAUSE;NET.wantPause=false}
+    if(NET.dProp&&NET.role==='host'){m|=(NET.dProp&CMD_D_MAX)<<CMD_D_SHIFT;NET.dPendAt=tgt;NET.dProp=0}
+    NET.lrec[tgt]=m;NET.lThrough=tgt;netFlush();
+  }else NET.pendIn|=netLocalMask()&MASK_ALL&~((NET.lrec[NET.lThrough]|0)&MASK_ALL);
+}
+/* D baru berlaku di frame F (sama di kedua HP, karena dibaca dari mask host di frame F) */
+function netSetD(F,nd){
+  NET.D=nd;NET.dLearn=nd;NET.dChanges++;NET.dLastAt=F;
+  netPushLocal(F);/* naik: isi celah sampai F+nd, langsung kirim */
+  netWinReset(netSettle());
+}
 /* Dipanggil sebelum update(): true = frame ini boleh dijalankan, false = tunggu input lawan */
 function netStep(){
   if(!G||!G.vs2)return true;
-  const F=NET.frame,D=NET.D;
-  if(NET.lThrough<F+D){
-    let m=netLocalMask();if(NET.wantPause){m|=CMD_PAUSE;NET.wantPause=false}
-    NET.lrec[F+D]=m;NET.lThrough=F+D;netFlush();
-  }
+  const now=performance.now();
+  if(now-NET.lastCall>250)netWinReset(netSettle());/* tidak ada percobaan step >250ms (pause/tab): bukan sinyal jaringan */
+  NET.lastCall=now;
+  const F=NET.frame;
+  netPushLocal(F);
   if(NET.rThrough<F)return false;
+  const host=NET.role==='host',lm0=NET.lrec[F]|0,rm0=NET.rrec[F]|0,m1x=host?lm0:rm0;
+  const dc=(m1x>>CMD_D_SHIFT)&CMD_D_MAX;
+  if(dc>=NET_DMIN&&dc!==NET.D)netSetD(F,dc);
   if(NET.rs&&F>=NET.rs.at){netDoResync(NET.rs);NET.rs=null}
-  const lm=NET.lrec[F]|0,rm=NET.rrec[F]|0,host=NET.role==='host',m1=host?lm:rm,m2=host?rm:lm;
+  const lm=lm0,rm=rm0,m1=host?lm:rm,m2=host?rm:lm;
   NET.pausePending=((m1|m2)&CMD_PAUSE)!==0;
   netApply(1,m1&MASK_ALL);netApply(2,m2&MASK_ALL);
+  const w=NET.w;if(w.skip>0)w.skip--;else{const sl=NET.rThrough-F;if(sl<w.min)w.min=sl;w.n++}
   return true;
+}
+/* Pengendali D (HANYA host, tiap NET_WIN_N frame). Ukuran: "slack" = berapa frame input lawan sudah tiba SEBELUM dibutuhkan
+   (min dalam jendela) dan stall yang benar-benar terjadi, dari KEDUA HP (client melapor lewat 'Q').
+   e = -(frame stall terpanjang) bila ada stall, selain itu e = slack minimum.
+   e < 1  -> naik D sebesar (2-e) (maks +4).   e >= 3 stabil (4 jendela, tanpa stall >6 dtk, tanpa kenaikan >8 dtk) -> turun 1 (2 bila e>=6).
+   Pita 1<=e<3 = zona stabil (hysteresis). Hasilnya hanya USUL; D baru dipasang lewat aliran input (lihat netPushLocal/netSetD). */
+function netCtlEval(F){
+  const w=NET.w,q=NET.q,D=NET.D;
+  let e=w.min,sf=Math.ceil(w.stallMax/16.67),stalls=w.stalls;
+  const qOk=!!(q&&q.mid===NET.mid&&q.F>NET.dLastAt&&F-q.F<=75);
+  if(qOk){e=Math.min(e,q.min);sf=Math.max(sf,Math.ceil(q.stallMax/16.67));stalls+=q.stalls;NET.q=null}
+  if(sf>0)e=-sf;
+  let nd=D;
+  if(e<NET_LOW_E){nd=D+clamp(NET_HEAD-e,1,4);NET.calm=0;NET.lastStallF=F;NET.lastRaiseF=F}
+  else if(e>=NET_HIGH_E&&qOk&&stalls===0){
+    NET.calm++;
+    if(NET.calm>=NET_CALM_N&&F-NET.lastStallF>=360&&F-NET.lastRaiseF>=480){nd=D-(e>=6?2:1);NET.calm=0}
+  }else NET.calm=0;
+  nd=clamp(nd,NET_DMIN,NET_DMAX);
+  if(nd!==D)NET.dProp=nd;
+  netWinReset(0);
 }
 /* Dipanggil setelah update() */
 function netAfter(){
   const F=NET.frame;
   if(F%30===29&&G&&state==='play'){const h=simHash();NET.chkL[F]=h;netSend('C'+F.toString(36)+','+h.toString(36));netChk(F)}
   NET.frame=F+1;
+  if(NET.w.n>=NET_WIN_N){
+    if(NET.role==='client'){const w=NET.w;netSend('Q'+NET.mid.toString(36)+','+F+','+Math.min(99,w.min)+','+Math.round(w.stallMax)+','+w.stalls);netWinReset(0)}
+    else if(NET.role==='host'&&!NET.dProp&&NET.frame>NET.dPendAt)netCtlEval(NET.frame);
+  }
   if(NET.pausePending){NET.pausePending=false;if(state==='play'&&G&&G.phase!=='end'){returnTo='pause';sfx('click');buildComboList();go('pause')}}
   const old=Math.min(NET.frame,NET.peerAck+1)-3;
   if(old>0&&(NET.frame&15)===0){for(const k in NET.lrec)if(+k<old)delete NET.lrec[k];for(const k in NET.rrec)if(+k<NET.frame-3)delete NET.rrec[k]}
@@ -2116,7 +2181,7 @@ function netChk(f){
 }
 function netStartResync(){
   if(NET.rs||!NET.lock||!G||state!=='play')return;
-  const at=NET.frame+NET.D+4,seed=(((Date.now()>>>0)^((Math.random()*0xffffffff)>>>0))>>>0)||1;
+  const at=Math.max(NET.frame+NET.D,NET.lThrough)+4,seed=(((Date.now()>>>0)^((Math.random()*0xffffffff)>>>0))>>>0)||1;
   NET.rs={at,seed,round:G.round,s0:G.score[0],s1:G.score[1]};
   netSend('Y'+at.toString(36)+','+seed.toString(36)+','+G.round+','+G.score[0]+','+G.score[1]);
 }
@@ -2134,12 +2199,12 @@ function netStatus(st){
   if(st==='connected'){
     NET.conn=true;NET.lastRecv=performance.now();
     if(NET.role==='client')netSend('H'+NET.sid);
-    if(NET.lock){NET.reconnectUntil=0;toast('TERSAMBUNG KEMBALI');netFlush();return}
+    if(NET.lock){NET.reconnectUntil=0;netWinReset(netSettle());toast('TERSAMBUNG KEMBALI');netFlush();return}
     if(NET.role==='host'){vs2p=true;document.body.classList.add('nethost');netInfo('Teman terhubung! Tekan KEMBALI lalu PLAY untuk memilih petarung & arena.');toast('TEMAN TERHUBUNG');netSend('Smenu')}
     else if(NET.role==='client'){netClientEnter()}
   }else if(st==='closed'){
     const was=NET.conn;NET.conn=false;
-    if(NET.lock){const n=performance.now();NET.reconnectUntil=n+25000;NET.reconnectNext=n+400;toast('KONEKSI PUTUS - MENYAMBUNG ULANG');return}
+    if(NET.lock){const n=performance.now();netWinReset(netSettle());NET.reconnectUntil=n+25000;NET.reconnectNext=n+400;toast('KONEKSI PUTUS - MENYAMBUNG ULANG');return}
     if(NET.role==='host'){Input2.clear();netInfo('Teman terputus. Menunggu koneksi baru...');toast('KONEKSI PUTUS')}
     else if(NET.role==='client'&&was){Input.clear();Input2.clear();toast('KONEKSI PUTUS');netLeave()}
   }
@@ -2149,9 +2214,10 @@ function netRecv(m){
   switch(c){
     case 'F':netGotFrames(b);break;
     case 'P':netSend('O'+b);break;
-    case 'O':{const t=parseInt(b,36),rtt=performance.now()-t;if(rtt>=0&&rtt<10000){NET.rtt=rtt;NET.rttAvg=NET.rttAvg?NET.rttAvg*.85+rtt*.15:rtt;NET.jit=NET.jit*.85+Math.abs(rtt-NET.rttAvg)*.15}NET.lastRecv=performance.now();break}
+    case 'O':{const t=parseInt(b,36),rtt=performance.now()-t;if(rtt>=0&&rtt<10000){NET.rtt=rtt;NET.rttN++;NET.rttAvg=NET.rttAvg?NET.rttAvg*.85+rtt*.15:rtt;NET.jit=NET.jit*.85+Math.abs(rtt-NET.rttAvg)*.15}NET.lastRecv=performance.now();break}
     case 'C':{const i=b.indexOf(','),f=parseInt(b.slice(0,i),36),h=parseInt(b.slice(i+1),36);if(f>=0&&Number.isFinite(h)){NET.chkR[f]=h>>>0;netChk(f)}break}
     case 'D':if(NET.role==='host')netStartResync();break;
+    case 'Q':if(NET.role==='host'){const p=b.split(',');const v={mid:parseInt(p[0],36),F:+p[1],min:+p[2],stallMax:+p[3],stalls:+p[4]};if(Number.isFinite(v.F+v.min+v.stallMax+v.stalls))NET.q=v}break;
     case 'Y':{const p=b.split(',');NET.rs={at:parseInt(p[0],36),seed:parseInt(p[1],36)>>>0,round:+p[2]|0,s0:+p[3]|0,s1:+p[4]|0};break}
     case 'R':if(NET.lock&&state==='pause')go('play');break;
     case 'B':NET.peerAway=b==='1';break;
@@ -2160,7 +2226,7 @@ function netRecv(m){
     case 'J':if(NET.role==='client'){
       let d;try{d=JSON.parse(b)}catch(e){return}
       if(d&&d.t==='match'&&d.seed){
-        NET.seed=d.seed>>>0;NET.mid=d.mid|0;NET.D=clamp(d.D|0,2,12);
+        NET.seed=d.seed>>>0;NET.mid=d.mid|0;NET.D=clamp(d.D|0,NET_DMIN,NET_DMAX);
         if(NET.savedSpeed===undefined)NET.savedSpeed=S.speed;
         vs2p=true;mapPick=d.map||'meadow';S.speed=Number(d.speed)||1;lastPick=d.lp==='me'?'me':'foe';
         startMatch(d.p1,false,d.p2,false);
@@ -4906,7 +4972,7 @@ function loop(ts){
       let steps=0;while(simAccumulator+1e-9>=SIM_DT&&steps<MAX_CATCHUP&&(state==='play'||state==='result')){
         const ln=NET.lock&&state==='play';/* lockstep: frame hanya jalan bila input kedua pemain untuk frame itu sudah ada */
         if(ln&&!netStep()){if(!NET.stallAt)NET.stallAt=ts;break}
-        if(ln&&NET.stallAt){NET.stalls++;NET.stallMs+=ts-NET.stallAt;NET.stallAt=0}
+        if(ln&&NET.stallAt){NET.stalls++;NET.stallMs+=ts-NET.stallAt;netNoteStall(ts-NET.stallAt);NET.stallAt=0}
         update(SIM_DT);if(ln)netAfter();
         simAccumulator-=SIM_DT;steps++;}
     }else simAccumulator=0;
