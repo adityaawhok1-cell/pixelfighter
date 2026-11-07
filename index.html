@@ -2001,32 +2001,39 @@ const dpPtr2=new Set();
 const Input2=Object.assign(Object.create(Input),{edge(a){onEdge2(a)},cnt:{},src:new Map(),held:{l:0,r:0,u:0,d:0,lh:0,rh:0,lf:0,rf:0},
  clear(){this.src.clear();this.cnt={};for(const k in this.held)this.held[k]=0;dpPtr2.clear()}});/* V62: input Player 2 */
 /* ===== MULTIPLAYER (local simulation / bidirectional input) ===== */
-const NET={role:null,conn:false,lastF:0,img:null,remote:'',pl:null,busy:false,seed:0,remoteApplying:false,localSources:new Map(),frame:0};
+const NET={role:null,conn:false,lastF:0,img:null,remote:'',pl:null,busy:false,seed:0,remoteApplying:false,localSources:new Map(),frame:0,lastHostMask:-1,lastClientMask:-1,inputSendAt:0,fxSlowMs:0,fxGoodMs:0,fxLastAt:0};
 window.__pfdbg=()=>({role:NET.role,conn:NET.conn,vs2p,state,seed:NET.seed,rngState:RNG_STATE,frame:NET.frame,leave:netLeave,inp:Input,game:G&&{phase:G.phase,p1:G.p&&G.p.hp,p2:G.e&&G.e.hp}});
 function netNative(){try{return !!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform())}catch(e){return false}}
 function netPlugin(){if(!NET.pl){try{const C=window.Capacitor;let P;if(typeof C.registerPlugin==='function'){P=C.registerPlugin('Net');P.addListener('msg',e=>netRecv(e.data));P.addListener('status',e=>netStatus(e.s))}else{const call=m=>o=>C.nativePromise('Net',m,o||{});P={startServer:call('startServer'),getIps:call('getIps'),connect:call('connect'),send:call('send'),close:call('close')};C.addListener('Net','msg',e=>netRecv(e&&e.data));C.addListener('Net','status',e=>netStatus(e&&e.s))}NET.pl=P}catch(err){NET.pl=null}}return NET.pl}
 function netSend(m){if(NET.conn&&NET.pl)try{NET.pl.send({data:m})}catch(e){}}
 (function(){
- const baseSet=Input.set,basePrs=Input.prs,baseRel=Input.rel;
- Input.prs=function(a){basePrs.call(this,a);if(NET.role==='host'&&NET.conn&&this===Input&&this.cnt[a]===1)netSend('p'+a)};
- Input.rel=function(a){baseRel.call(this,a);if(NET.role==='host'&&NET.conn&&this===Input&&!this.cnt[a])netSend('r'+a)};
- Input.set=function(src,acts){
-   /* Di client, kontrol utama dipetakan ke P2 lokal; wrapper Input2.set
-      yang mengirim perubahan input tepat satu kali ke host. */
-   if(NET.role==='client'&&this===Input&&!NET.remoteApplying)return Input2.set(src,acts||[]);
-   return baseSet.call(this,src,acts);
+ const baseSet=Input.set;
+ const NET_KEYS=['l','r','u','d','lh','rh','lf','rf','ult'];
+ const netMask=inp=>NET_KEYS.reduce((m,a,i)=>m|(inp.held[a]?1<<i:0),0);
+ const netActions=mask=>NET_KEYS.filter((a,i)=>mask&(1<<i));
+ const sendMask=(side,mask,force)=>{
+   const key=side==='i'?'lastHostMask':'lastClientMask';
+   if(!force&&NET[key]===mask)return;
+   NET[key]=mask;netSend(side+mask.toString(36));
  };
- const input2BaseSet=baseSet;
- Input2.set=function(src,acts){
-   const keys=['l','r','u','d','lh','rh','lf','rf','ult'],before={};
-   if(NET.role==='client'&&!NET.remoteApplying)for(const a of keys)before[a]=!!this.held[a];
-   const result=input2BaseSet.call(this,src,acts||[]);
-   if(NET.role==='client'&&NET.conn&&!NET.remoteApplying){
-     for(const a of keys){const after=!!this.held[a];if(after!==before[a])netSend((after?'P':'R')+a)}
-   }
+ Input.set=function(src,acts){
+   /* Input utama pada client adalah kontrol lokal P2; P1 diterapkan
+      langsung lewat baseSet agar tidak salah diarahkan ke Input2. */
+   if(NET.role==='client'&&this===Input&&!NET.remoteApplying)return Input2.set(src,acts||[]);
+   const result=baseSet.call(this,src,acts||[]);
+   if(NET.role==='host'&&NET.conn&&this===Input)sendMask('i',netMask(Input),false);
    return result;
  };
+ Input2.set=function(src,acts){
+   const result=baseSet.call(this,src,acts||[]);
+   if(NET.role==='client'&&NET.conn&&!NET.remoteApplying)sendMask('I',netMask(Input2),false);
+   return result;
+ };
+ NET.sendMask=sendMask;
  NET.applyHostInput=function(a,down){NET.remoteApplying=true;try{baseSet.call(Input,'host:'+a,down?[a]:[])}finally{NET.remoteApplying=false}};
+ NET.applyHostMask=function(mask){NET.remoteApplying=true;try{baseSet.call(Input,'host:snapshot',netActions(mask>>>0))}finally{NET.remoteApplying=false}};
+ NET.applyClientMask=function(mask){Input2.set('net:snapshot',netActions(mask>>>0))};
+ NET.readMask=inp=>netMask(inp);
 })();
 function netInfo(t){const el=$('netInfo');if(el)el.textContent=t}
 function netMsg(t){const el=$('netMsg');if(!el)return;el.textContent=t||'';el.style.display=t?'block':'none'}
@@ -2035,18 +2042,20 @@ function netStatus(st){
     if(NET.role==='host'){vs2p=true;document.body.classList.add('nethost');netInfo('Teman terhubung! Tekan KEMBALI lalu PLAY untuk memilih petarung & arena.');toast('TEMAN TERHUBUNG');netSend('Smenu')}
     else if(NET.role==='client'){netClientEnter()}}
   else if(st==='closed'){const was=NET.conn;NET.conn=false;
-    if(NET.role==='host'){netInfo('Teman terputus. Menunggu koneksi baru...');toast('KONEKSI PUTUS')}
+    if(NET.role==='host'){Input2.clear();NET.lastClientMask=-1;NET.lastHostMask=-1;netInfo('Teman terputus. Menunggu koneksi baru...');toast('KONEKSI PUTUS')}
     else if(NET.role==='client'&&was){Input.clear();Input2.clear();toast('KONEKSI PUTUS');netLeave()}}
 }
 function netRecv(m){if(!m)return;const c=m[0],b=m.slice(1);
   if(NET.role==='host'){
-    if(c==='P')Input2.set('net:'+b,[b]);else if(c==='R')Input2.set('net:'+b,[]);
+    if(c==='I'){const mask=parseInt(b,36);if(Number.isFinite(mask))NET.applyClientMask(mask)}
+    else if(c==='P')Input2.set('net:'+b,[b]);else if(c==='R')Input2.set('net:'+b,[]);
     else if(c==='Q'){if(b==='pause')pauseGame();else if(b==='play')resumeGame()}
   }else if(NET.role==='client'){
-    if(c==='p')NET.applyHostInput(b,true);else if(c==='r')NET.applyHostInput(b,false);
+    if(c==='i'){const mask=parseInt(b,36);if(Number.isFinite(mask))NET.applyHostMask(mask)}
+    else if(c==='p')NET.applyHostInput(b,true);else if(c==='r')NET.applyHostInput(b,false);
     else if(c==='J'){
       let d;try{d=JSON.parse(b)}catch(e){return}
-      if(d&&d.t==='match'&&d.seed){NET.seed=d.seed>>>0;vs2p=true;mapPick=d.map||'meadow';S.speed=Number(d.speed)||1;NET.remoteApplying=true;try{startMatch(d.p1,d.p2,false,false);if(G)G.split=false;document.body.classList.remove('twop','split')}finally{NET.remoteApplying=false}netMsg('');}
+      if(d&&d.t==='match'&&d.seed){NET.seed=d.seed>>>0;if(NET.savedFx===undefined)NET.savedFx=S.fx;if(S.fx==='FULL')S.fx='LOW';vs2p=true;mapPick=d.map||'meadow';S.speed=Number(d.speed)||1;NET.remoteApplying=true;try{startMatch(d.p1,d.p2,false,false);if(G)G.split=false;document.body.classList.remove('twop','split')}finally{NET.remoteApplying=false}netMsg('');}
     }else if(c==='S'){
       NET.remote=b;
       if(b==='pause'&&state==='play')go('pause');
@@ -2062,7 +2071,7 @@ function netClientEnter(){NET.img=null;state='netplay';for(const n of SCREENS){c
   document.body.classList.add('playing','netclient','touchui');document.body.classList.remove('twop','split');netMsg('MENUNGGU HOST MEMILIH PETARUNG...')}
 function netLeave(){
   try{if(NET.pl)NET.pl.close()}catch(e){}
-  NET.role=null;NET.conn=false;NET.img=null;NET.localSources.clear();document.body.classList.remove('nethost','netclient','playing');netMsg('');
+  NET.role=null;NET.conn=false;NET.img=null;NET.localSources.clear();NET.lastHostMask=-1;NET.lastClientMask=-1;NET.inputSendAt=0;if(NET.savedFx!==undefined){S.fx=NET.savedFx;NET.savedFx=undefined}NET.inputSendAt=0;document.body.classList.remove('nethost','netclient','playing');netMsg('');
   if(state==='netplay'||state==='play'||state==='pause'||state==='result'){Input.clear();Input2.clear();G=null;state='menu';go('menu')}}
 async function netHost(){
   if(!netNative()){netInfo('Multiplayer hanya jalan di aplikasi APK, bukan di browser.');return}
@@ -2076,12 +2085,20 @@ async function netJoin(){
   const pl=netPlugin();if(!pl){netInfo('Plugin jaringan tidak ditemukan. Pastikan APK dibuat dengan workflow terbaru.');return}
   LS.set('pf_netip',ip);netInfo('Menyambung ke '+ip+' ...');NET.role='client';
   try{await pl.connect({host:ip,port:8765})}catch(e){NET.role=null;netInfo('Gagal tersambung: '+(e&&e.message||e)+'. Cek IP & pastikan sama-sama di hotspot.')}}
-function netTick(){/* Tidak ada streaming JPEG: kedua perangkat menggambar simulasi lokal */
+function netTick(){
+  /* Render selalu lokal. Snapshot tombol 30 Hz menggantikan banyak paket
+     tekan/lepas: keadaan tombol yang hilang/terlambat akan terkoreksi otomatis. */
   if(!NET.conn)return;
-  if(NET.role==='host'&&G&&(state==='play'||state==='pause'||state==='result')){
-    NET.frame++;
-    if(state==='result'&&NET.lastResultFrame!==NET.frame){NET.lastResultFrame=NET.frame;}
-  }}
+  const now=performance.now();
+  if(NET.role==='host'&&G&&(state==='play'||state==='pause'||state==='result'))NET.frame++;
+  /* Heartbeat 30 Hz: paket sangat kecil, memperbaiki state tombol bila
+     satu update input terlewat tanpa membanjiri antrean native. */
+  if(now-(NET.inputSendAt||0)>=33){
+    NET.inputSendAt=now;
+    if(NET.role==='host')NET.sendMask('i',NET.readMask(Input),true);
+    else if(NET.role==='client')NET.sendMask('I',NET.readMask(Input2),true);
+  }
+}
 function netClientRender(){/* legacy fallback intentionally disabled */
   const c=ctx;c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,VW,canvas.height);c.fillStyle='#0b0b1e';c.fillRect(0,0,VW,canvas.height)}
 function onEdgeFor(f,inp,a){if(state!=='play'||!G||G.phase!=='fight'||f.ai)return;if(a==='ult'){f.useUltimate();return}if(BTNS[a]){if((a==='lh'||a==='rh')&&inp.held.lh&&inp.held.rh&&!f.slamIntent()&&f.useUltimate())return;f.pressAttack(a)}else f.pressDir(a)}
@@ -3452,7 +3469,7 @@ function startMatch(id,train,chosenFoe,story){
 }
 const _startMatchCore=startMatch;
 startMatch=function(id,train,chosenFoe,story){
-  if(NET.role==='host'&&NET.conn){NET.seed=((Date.now()>>>0)^((performance.now()*1000)>>>0)^((Math.random()*0xffffffff)>>>0))>>>0;}
+  if(NET.role==='host'&&NET.conn){if(NET.savedFx===undefined)NET.savedFx=S.fx;S.fx='LOW';NET.seed=((Date.now()>>>0)^((performance.now()*1000)>>>0)^((Math.random()*0xffffffff)>>>0))>>>0;}
   if(NET.role==='client'&&NET.seed)seedRng(NET.seed);
   else if(NET.role==='host'&&NET.seed)seedRng(NET.seed);
   _startMatchCore(id,train,chosenFoe,story);
@@ -4724,11 +4741,16 @@ function resize(){
   for(const el of [canvas,ui]){el.style.left=l+'px';el.style.top=t+'px';el.style.width=cw+'px';el.style.height=ch+'px'}
   document.documentElement.style.setProperty('--u',(Math.floor(VH*sc)/100)+'px');document.documentElement.style.setProperty('--ptop',canvas.height>VH?Math.round((SH-22)*sc)+'px':'');checkOrient();
 }
-let last=0,simAccumulator=0;const SIM_DT=1/60,MAX_CATCHUP=5;
+let last=0,simAccumulator=0;const SIM_DT=1/60,MAX_CATCHUP=5,RENDER_MIN_MS=1000/60;
 function loop(ts){
   requestAnimationFrame(loop);
-  if(last&&ts-last<10)return;
-  const real=Math.min(.05,(ts-last)/1000||0);last=ts;menuT+=real;
+  /* Batasi gambar maksimal 60 Hz; layar 90/120 Hz tidak perlu membuat
+     perangkat bekerja dua kali lebih berat untuk simulasi 60 Hz. */
+  if(last&&ts-last<RENDER_MIN_MS-.25)return;
+  const real=Math.min(.05,(ts-last)/1000||0);
+  const frameMs=last?ts-last:16.67;last=ts;menuT+=real;
+  /* FX multiplayer disamakan LOW pada kedua perangkat agar beban turun
+     tanpa mengubah jumlah pemanggilan RNG kosmetik secara berbeda. */
   try{
     if(state==='play'||state==='result'){
       simAccumulator=Math.min(simAccumulator+real*S.speed,SIM_DT*MAX_CATCHUP);
@@ -4738,6 +4760,10 @@ function loop(ts){
     syncWorld();syncCtrl();render();netTick();
   }catch(err){console.error(err)}
 }
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){simAccumulator=0;last=0}
+  else{simAccumulator=0;last=0}
+});
 function init(){
   buildLayers();buildP2Controls();buildIcons();buildCostumeUI();buildSettingsUI();buildComboList();bindControls();bindControls2();bindEvents();
   if(isTouch)document.body.classList.add('touchui');
