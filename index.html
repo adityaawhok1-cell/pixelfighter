@@ -667,7 +667,11 @@ const ZM={delay:.6,dur:1.5,pause:.7,hold:1.4,out:.8,Z:1.6,dy:.47};ZM.text=ZM.del
 /* V13: Waluyo 'JOS JIS!!!' - t0 = detik (sejak kemenangan) saat jempol menghentak, hold = lama pose ditahan, ex = tambahan jeda sebelum zoom-out ronde biasa */
 const JOS={t0:ZM.text-.1,hold:2.5,ex:0};JOS.ex=JOS.t0+JOS.hold-ZM.out0;
 const $=id=>document.getElementById(id);
-const rnd=(a,b)=>a+Math.random()*(b-a), rint=(a,b)=>Math.floor(rnd(a,b+.999));
+/* PRNG seeded: fondasi replay/sinkronisasi. Seed di-reset setiap match. */
+let RNG_STATE=0x6d2b79f5;
+function seedRng(seed){RNG_STATE=(seed>>>0)||0x6d2b79f5;return RNG_STATE}
+function rand(){let t=RNG_STATE+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296}
+const rnd=(a,b)=>a+rand()*(b-a), rint=(a,b)=>Math.floor(rnd(a,b+.999));
 const clamp=(v,a,b)=>v<a?a:v>b?b:v, lerp=(a,b,t)=>a+(b-a)*t;
 const app=(v,t,d)=>v<t?Math.min(t,v+d):Math.max(t,v-d);
 const ov=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
@@ -988,7 +992,7 @@ let PORT_PL=[],PORT_SEED=0;
 const PORT_COLS=[['#b94b38','#e17a55','#7f3029'],['#315f91','#5a8fcf','#1f3e63'],['#d19b32','#f0c85a','#8a6418'],['#39765c','#5fb08e','#244c3b']];
 function mkPortCrate(x,base){const s=PORT_SEED++,hp=2+(s%3===0?1:0);return{x,y:base-28,base,w:28,h:28,hp,max:hp,flash:0,shake:0,dead:false,seed:s}}
 function makePortCrates(){
-  const R=(a,b)=>a+Math.floor(Math.random()*(b-a+1));
+  const R=(a,b)=>a+Math.floor(rand()*(b-a+1));
   const pl=[],crates=[];
   const addCrate=(x,base)=>{x=Math.round(x);if(crates.some(q=>q.base===base&&Math.abs(q.x-x)<32))return;crates.push(mkPortCrate(x,base))};
   const mid=PORT_W/2;let x=R(90,200),centerDone=false;
@@ -1005,22 +1009,22 @@ function makePortCrates(){
       x=mid+390;continue;
     }
     if(centerDone&&x<mid+390){x=mid+390;continue}
-    const r=Math.random();
+    const r=rand();
     if(r<.32){
-      const w=R(80,106),h=Math.random()<.45?2:1,col=R(0,3);
+      const w=R(80,106),h=rand()<.45?2:1,col=R(0,3);
       stack(x,w,h,col);
-      if(Math.random()<.75)addCrate(x+R(6,w-34),FLOOR-26*h);
-      if(Math.random()<.35)addCrate(x+w+R(8,30),FLOOR);
+      if(rand()<.75)addCrate(x+R(6,w-34),FLOOR-26*h);
+      if(rand()<.35)addCrate(x+w+R(8,30),FLOOR);
       x+=w+R(55,140);
     }else if(r<.58){
       const w=R(70,125),y=[178,154,128][R(0,2)];
       girder(x,w,y);
-      if(Math.random()<.7)addCrate(x+R(4,w-32),y);
-      if(Math.random()<.4)addCrate(x+R(0,w-28),FLOOR);
+      if(rand()<.7)addCrate(x+R(4,w-32),y);
+      if(rand()<.4)addCrate(x+R(0,w-28),FLOOR);
       x+=w+R(45,120);
     }else if(r<.82){
       const n=R(1,3);for(let i=0;i<n;i++)addCrate(x+i*30,FLOOR);
-      if(n>=2&&Math.random()<.6)addCrate(x+15,FLOOR-28);
+      if(n>=2&&rand()<.6)addCrate(x+15,FLOOR-28);
       x+=n*30+R(50,130);
     }else if(r<.93){
       /* tangga container + girder tinggi */
@@ -1039,7 +1043,7 @@ function respawnPortCrate(g){
   const sup=[{x:Math.max(30,lo),w:Math.min(PORT_W-30,hi)-Math.max(30,lo),y:FLOOR},{x:Math.max(30,lo),w:Math.min(PORT_W-30,hi)-Math.max(30,lo),y:FLOOR}];
   for(const p of PORT_PL)if(p.x+p.w>lo&&p.x<hi&&p.w>=40)sup.push({x:p.x,w:p.w,y:p.y});
   for(let t=0;t<10;t++){
-    const s=sup[rint(0,sup.length-1)],x=Math.round(s.x+Math.random()*Math.max(1,s.w-30));
+    const s=sup[rint(0,sup.length-1)],x=Math.round(s.x+rand()*Math.max(1,s.w-30));
     if(g.crates.some(q=>q.base===s.y&&Math.abs(q.x-x)<34))continue;
     if([g.p,g.e].some(f=>Math.abs(f.x-(x+14))<26&&Math.abs(f.y-s.y)<30))continue;
     const q=mkPortCrate(x,s.y);g.crates.push(q);
@@ -1844,9 +1848,9 @@ const Aud={lt:{},rvIn:null,ctx:null,mg:null,mf:null,dIn:null,sg:null,nb:null,mod
  init(){if(this.ctx){if(this.ctx.state==='suspended')this.ctx.resume();return}
   try{const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;const c=this.ctx=new AC();
    this.mg=c.createGain();this.sg=c.createGain();this.mf=c.createGain();this.mf.gain.value=0;this.mg.connect(this.mf);this.mf.connect(c.destination);{/* V59 TAHAP 5: limiter ringan agar SFX berlapis tetap tebal & tidak pecah */const cp=c.createDynamicsCompressor();cp.threshold.value=-13;cp.knee.value=8;cp.ratio.value=6;cp.attack.value=.003;cp.release.value=.14;this.sg.connect(cp);cp.connect(c.destination)}
-   {/* reverb pendek untuk ultimate / KO / slam */const len=c.sampleRate*1|0,ir=c.createBuffer(2,len,c.sampleRate);for(let h=0;h<2;h++){const dd=ir.getChannelData(h);for(let i=0;i<len;i++)dd[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.6)}const cv=c.createConvolver();cv.buffer=ir;const wg=c.createGain();wg.gain.value=.5;cv.connect(wg);wg.connect(this.sg);this.rvIn=cv}
+   {/* reverb pendek untuk ultimate / KO / slam */const len=c.sampleRate*1|0,ir=c.createBuffer(2,len,c.sampleRate);for(let h=0;h<2;h++){const dd=ir.getChannelData(h);for(let i=0;i<len;i++)dd[i]=(rand()*2-1)*Math.pow(1-i/len,2.6)}const cv=c.createConvolver();cv.buffer=ir;const wg=c.createGain();wg.gain.value=.5;cv.connect(wg);wg.connect(this.sg);this.rvIn=cv}
    {/* echo dotted-eighth untuk lead menu */const dly=c.createDelay(1),fb=c.createGain(),dIn=c.createGain();dIn.gain.value=.26;dly.delayTime.value=60/MBPM*.75;fb.gain.value=.34;dIn.connect(dly);dly.connect(fb);fb.connect(dly);dly.connect(this.mg);this.dIn=dIn;this.dly=dly}
-   const b=c.createBuffer(1,c.sampleRate*.4,c.sampleRate),d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;this.nb=b;
+   const b=c.createBuffer(1,c.sampleRate*.4,c.sampleRate),d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=rand()*2-1;this.nb=b;
    this.apply();this.nextT=c.currentTime+.1;this.fadeTo(1,this.mode==='main'?1.6:.4);this.timer=setInterval(()=>this.sched(),30);if(c.state==='suspended')c.resume()}catch(e){}},
  fadeTo(v,dur){const c=this.ctx;if(!c||!this.mf)return;const t=c.currentTime,g=this.mf.gain;g.cancelScheduledValues(t);g.setValueAtTime(g.value,t);g.linearRampToValueAtTime(v,t+dur)},
  /* ganti musik: fade-out singkat, urutan mulai dari awal, fade-in (menu utama lebih lembut). Memanggil mode yang sama = tidak melakukan apa pun (tidak bertumpuk / tidak restart). */
@@ -1932,7 +1936,7 @@ const Aud={lt:{},rvIn:null,ctx:null,mg:null,mf:null,dIn:null,sg:null,nb:null,mod
   if(o.rv&&this.rvIn){const r=c.createGain();r.gain.value=o.rv;g.connect(r);r.connect(this.rvIn)}os.start(t);os.stop(t+dur+.03)},
  nx(t,dur,v,fc,fc2,o){o=o||{};const c=this.ctx,s=c.createBufferSource(),fl=c.createBiquadFilter(),g=c.createGain();s.buffer=this.nb;s.loop=true;fl.type=o.ft||'bandpass';fl.Q.value=o.q||.9;fl.frequency.setValueAtTime(fc,t);if(fc2)fl.frequency.exponentialRampToValueAtTime(Math.max(30,fc2),t+dur);
   g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(v,t+(o.atk||.002));g.gain.exponentialRampToValueAtTime(.001,t+dur);s.connect(fl);fl.connect(g);g.connect(this.sg);
-  if(o.rv&&this.rvIn){const r=c.createGain();r.gain.value=o.rv;g.connect(r);r.connect(this.rvIn)}s.start(t,Math.random()*.2);s.stop(t+dur+.03)},
+  if(o.rv&&this.rvIn){const r=c.createGain();r.gain.value=o.rv;g.connect(r);r.connect(this.rvIn)}s.start(t,rand()*.2);s.stop(t+dur+.03)},
  imp(t,w){/* V60: impact arcade ringan — soft thump + airy snap, tanpa crack tajam / bass berlebihan */
   const heavy=w>=2,very=w>=3;
   this.nx(t,.035,heavy?.22:.14,2800,4200,{ft:'highpass',q:.65});
@@ -1999,7 +2003,7 @@ const Input2=Object.assign(Object.create(Input),{edge(a){onEdge2(a)},cnt:{},src:
  clear(){this.src.clear();this.cnt={};for(const k in this.held)this.held[k]=0;dpPtr2.clear()}});/* V62: input Player 2 */
 /* ===== MULTIPLAYER (hotspot) ===== */
 const NET={role:null,conn:false,lastF:0,img:null,remote:'',pl:null,busy:false};
-window.__pfdbg=()=>({role:NET.role,conn:NET.conn,vs2p,state,leave:netLeave,inp:Input});
+window.__pfdbg=()=>({role:NET.role,conn:NET.conn,vs2p,state,leave:netLeave,inp:Input,seed:G&&G.seed,rngState:RNG_STATE,simDt:SIM_DT});
 function netNative(){try{return !!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform())}catch(e){return false}}
 function netPlugin(){if(!NET.pl){try{const C=window.Capacitor;let P;if(typeof C.registerPlugin==='function'){P=C.registerPlugin('Net');P.addListener('msg',e=>netRecv(e.data));P.addListener('status',e=>netStatus(e.s))}else{const call=m=>o=>C.nativePromise('Net',m,o||{});P={startServer:call('startServer'),getIps:call('getIps'),connect:call('connect'),send:call('send'),close:call('close')};C.addListener('Net','msg',e=>netRecv(e&&e.data));C.addListener('Net','status',e=>netStatus(e&&e.s))}NET.pl=P}catch(err){NET.pl=null}}return NET.pl}
 function netSend(m){if(NET.conn&&NET.pl)try{NET.pl.send({data:m})}catch(e){}}
@@ -2169,7 +2173,7 @@ function lspFx(f,dt){
     for(let i=0;i<(fl>1?2:1);i++)addP({k:'sq',x:x+rnd(-11,11),y:y-rnd(2,42),vx:rnd(-30,30),vy:rnd(-40,0),g:0,life:.22,max:.22,z:rint(1,2),col:cols[rint(0,2)]});
     const T=f.tips,ks=['lh','rh','lf','rf'];
     if(T){const tp=T[ks[rint(0,3)]];if(tp)addP({k:'sq',x:x+fc*tp[0]+rnd(-2,2),y:y+tp[1]+(T.yoff||0)+rnd(-2,2),vx:rnd(-25,25),vy:rnd(-30,10),g:0,life:.2,max:.2,z:2,col:cols[rint(0,2)]})}
-    if(fl>1&&Math.random()<.5){const bx=x+rnd(-8,8),by=y-rnd(5,40);boltFx(bx,by,bx+rnd(-14,14),by+rnd(-12,12),3,2,.1,1)}
+    if(fl>1&&rand()<.5){const bx=x+rnd(-8,8),by=y-rnd(5,40);boltFx(bx,by,bx+rnd(-14,14),by+rnd(-12,12),3,2,.1,1)}
     if(a.t>=m.dash.from&&a.t<=m.dash.to+.05)for(let i=0;i<(fl>1?2:1);i++){const yy=y-rnd(6,40);boltFx(x-fc*rnd(4,10),yy,x-fc*rnd(40,70),yy+rnd(-2,2),4,2,.16,1)}
   }
 }
@@ -2206,13 +2210,13 @@ function elecVictFx(f,dt){
   f.eT-=dt;if(f.eT>0)return;f.eT=(turn?.03:hero?.1:.055)*(fl>1?1:2);
   const sy=y-26+yo,n=turn?3:hero?1:2;
   for(let i=0;i<n;i++){const an=rnd(0,6.28),r=rnd(10,15);addP({k:'sq',x:x+Math.cos(an)*r,y:sy+Math.sin(an)*r*1.6,vx:-Math.sin(an)*30,vy:Math.cos(an)*18-14,g:0,life:.35,max:.35,z:rint(1,2),col:cols[rint(0,2)]})}
-  if(Math.random()<(turn?.9:hero?.3:.55)){
-    const q=Math.random();let ax,ay;
+  if(rand()<(turn?.9:hero?.3:.55)){
+    const q=rand();let ax,ay;
     if(q<.3){ax=x+fc*rnd(-6,6);ay=sy-1}
     else if(q<.65){const h=hands[rint(0,1)];if(h){ax=lerp(x,h[0],.55);ay=lerp(sy,h[1],.55)}else{ax=x;ay=sy}}
-    else{const ft=pt(Math.random()<.5?T.lf:T.rf);if(ft){ax=lerp(x,ft[0],.6);ay=lerp(y-12+yo,ft[1],.6)}else{ax=x;ay=y-8}}
+    else{const ft=pt(rand()<.5?T.lf:T.rf);if(ft){ax=lerp(x,ft[0],.6);ay=lerp(y-12+yo,ft[1],.6)}else{ax=x;ay=y-8}}
     boltFx(ax,ay,ax+rnd(-9,9),ay+rnd(-9,9),3,2,.12,1)}
-  if(turn||Math.random()<.2){const an=rnd(0,6.28),sp=rnd(40,70);addP({k:'sq',x:x+Math.cos(an)*8,y:sy+Math.sin(an)*10,vx:Math.cos(an)*sp,vy:Math.sin(an)*sp,g:0,life:.5,max:.5,z:rint(1,2),col:cols[rint(0,2)]})}
+  if(turn||rand()<.2){const an=rnd(0,6.28),sp=rnd(40,70);addP({k:'sq',x:x+Math.cos(an)*8,y:sy+Math.sin(an)*10,vx:Math.cos(an)*sp,vy:Math.sin(an)*sp,g:0,life:.5,max:.5,z:rint(1,2),col:cols[rint(0,2)]})}
 }
 function vib(ms){try{if(isTouch&&navigator.vibrate)navigator.vibrate(ms)}catch(e){}}
 /* ---------- V13: JOS JIS!!! (kemenangan Waluyo) ---------- */
@@ -2232,8 +2236,8 @@ function josFx(f,dt){
   if(!fl)return;
   f.jsT=(f.jsT||0)-dt;if(f.jsT>0)return;f.jsT=fl>1?.08:.16;
   const an=rnd(0,6.28),r=rnd(18,46);
-  addP({k:'star',x:f.x+Math.cos(an)*r*1.1,y:f.y-30+Math.sin(an)*r,vx:0,vy:-10,g:0,life:.3,max:.3,z:rint(2,4),col:Math.random()<.5?'#ffffff':'#ffd040'});
-  if(Math.random()<.5)addP({k:'sq',x:fx+rnd(-14,14),y:fy+rnd(-18,18),vx:rnd(-20,20),vy:rnd(-40,-10),g:0,life:.4,max:.4,z:2,col:'#fff6b0'});
+  addP({k:'star',x:f.x+Math.cos(an)*r*1.1,y:f.y-30+Math.sin(an)*r,vx:0,vy:-10,g:0,life:.3,max:.3,z:rint(2,4),col:rand()<.5?'#ffffff':'#ffd040'});
+  if(rand()<.5)addP({k:'sq',x:fx+rnd(-14,14),y:fy+rnd(-18,18),vx:rnd(-20,20),vy:rnd(-40,-10),g:0,life:.4,max:.4,z:2,col:'#fff6b0'});
 }
 /* berkas cahaya (impact lines) + lingkar kuning di belakang Waluyo */
 function josRays(c,x,y,jt,T){
@@ -3177,7 +3181,7 @@ function updOrs(g,dt){
     const r=g.ors[i];r.t+=dt;
     if(g.phase!=='fight'||(!r.hit&&(r.o.stun>0||r.o.state==='down'))){if(!r.hit)burst(r.x,r.gy-20,10,['#40f0ff','#ffffff'],120,.4,100);g.ors.splice(i,1);continue}
     if(r.t<ORB.lk){r.x=r.tg.x;r.gy=groundBelow(r.tg.x,r.tg.y)}
-    else if(!r.hit&&FXL()>0&&Math.random()<.8){const dx=rnd(-20,20);addP({k:'sq',x:r.x+dx,y:r.gy-rnd(30,150),vx:-dx*3,vy:rnd(120,220),g:0,life:.25,max:.25,z:1,col:Math.random()<.5?'#40f0ff':'#ffffff'})}
+    else if(!r.hit&&FXL()>0&&rand()<.8){const dx=rnd(-20,20);addP({k:'sq',x:r.x+dx,y:r.gy-rnd(30,150),vx:-dx*3,vy:rnd(120,220),g:0,life:.25,max:.25,z:1,col:rand()<.5?'#40f0ff':'#ffffff'})}
     if(!r.hit&&r.t>=ORB.st){
       r.hit=1;const tg=r.tg;ucBeat(r.o,r.x,r.gy-20,2);
       g.shake=Math.max(g.shake,8);sfx('ultimate');
@@ -3307,9 +3311,9 @@ function aiReact(f,o,C,A){
   /* V26: COUNTER setelah berhasil guard / parry (parry = lawan stun, hampir pasti kena) */
   const blk=f.pkT>0||f.guardHit>0;
   if(blk&&!A.blk){A.blk=true;
-    if(C.counter>0&&!f.attack&&f.cd<=0&&dist<=52&&dyy<46&&Math.random()<(f.pkT>0?Math.min(1,C.counter+.15):C.counter)){
+    if(C.counter>0&&!f.attack&&f.cd<=0&&dist<=52&&dyy<46&&rand()<(f.pkT>0?Math.min(1,C.counter+.15):C.counter)){
       if(f.ult>=100&&f.pkT>0&&dist<92){f.useUltimate();return}
-      if(Math.random()<C.combo){const opts=AI_SEQ.filter(q=>dist>=q.min&&dist<=q.max);if(opts.length){const q=opts[rint(0,opts.length-1)];A.seq=q.s.map(x=>Object.assign({},x));A.seqT=0;A.rmode=null;return}}
+      if(rand()<C.combo){const opts=AI_SEQ.filter(q=>dist>=q.min&&dist<=q.max);if(opts.length){const q=opts[rint(0,opts.length-1)];A.seq=q.s.map(x=>Object.assign({},x));A.seqT=0;A.rmode=null;return}}
       f.pressAttack(dist<28?['lh','rh','lf'][rint(0,2)]:['rf','lf','rh'][rint(0,2)]);A.rmode=null;return}
   }else if(!blk)A.blk=false;
   if(!oa){A.rid=null;A.rmode=null;A.pid=null;return}
@@ -3319,9 +3323,9 @@ function aiReact(f,o,C,A){
     /* V26: ANTI-SPAM — lawan mengulang serangan yang sama -> AI makin sering guard/parry */
     const nm=mv&&(mv.name||mv.cid||mv.sfx||'x');A.spam=(nm&&nm===A.sn)?(A.spam||0)+1:0;A.sn=nm;
     const sb=C.parry>0?Math.min(.35,(A.spam||0)*.12*(C.adapt||1)):0;
-    if(h&&h.grab&&C.punish>.5&&dist<85&&f.onG&&!f.attack&&Math.random()<.75){f.pressDir('u');A.dx=o.x>f.x?-1:1;A.moveT=.3}/* hindari cengkeraman: lompat mundur */
+    if(h&&h.grab&&C.punish>.5&&dist<85&&f.onG&&!f.attack&&rand()<.75){f.pressDir('u');A.dx=o.x>f.x?-1:1;A.moveT=.3}/* hindari cengkeraman: lompat mundur */
     else if(h&&!h.grab&&dist<100&&dyy<50&&f.onG&&!f.attack&&f.cd<=0){
-      const r=Math.random();
+      const r=rand();
       if(r<C.parry+sb)A.rmode='parry';else if(r<C.parry+C.guard+sb*1.5)A.rmode='guard';
     }
   }
@@ -3338,9 +3342,9 @@ function aiReact(f,o,C,A){
     const rng=f.weapon==='gun'?150:f.weapon==='sword'?46:34,toward=o.x>f.x?1:-1;
     if(dist<=rng+16&&dyy<46){
       A.pid=oa;
-      if(Math.random()<C.punish){
-        if(f.ult>=100&&C.counter>.5&&dist<92&&Math.random()<.6){f.useUltimate();return}
-        if(Math.random()<C.combo){const opts=AI_SEQ.filter(q=>dist>=q.min&&dist<=q.max);if(opts.length){const q=opts[rint(0,opts.length-1)];A.seq=q.s.map(x=>Object.assign({},x));A.seqT=0;return}}
+      if(rand()<C.punish){
+        if(f.ult>=100&&C.counter>.5&&dist<92&&rand()<.6){f.useUltimate();return}
+        if(rand()<C.combo){const opts=AI_SEQ.filter(q=>dist>=q.min&&dist<=q.max);if(opts.length){const q=opts[rint(0,opts.length-1)];A.seq=q.s.map(x=>Object.assign({},x));A.seqT=0;return}}
         f.pressAttack(dist<28?['lh','rh','lf'][rint(0,2)]:['rf','lf','rh'][rint(0,2)]);
       }
     }else if(dist<=rng+70&&dyy<60){A.dx=toward;A.moveT=.22}
@@ -3351,14 +3355,14 @@ function aiDecide(f,o,C){
   if(A.rmode&&o.attack&&o.attack===A.rid)return;
   const dist=Math.abs(o.x-f.x),dy=o.y-f.y,toward=o.x>f.x?1:-1;
   // menghindari serangan
-  if(o.attack&&!f.attack&&dist<80&&Math.random()<C.dodge){
+  if(o.attack&&!f.attack&&dist<80&&rand()<C.dodge){
     const h=o.attack.move.hits[0];
-    if(h&&h.box.y<-24&&f.onG&&Math.random()<.6){A.crouch=.45;A.dx=0;return}
-    A.dx=-toward;A.moveT=.35;if(f.onG&&Math.random()<.5)f.pressDir('u');return;
+    if(h&&h.box.y<-24&&f.onG&&rand()<.6){A.crouch=.45;A.dx=0;return}
+    A.dx=-toward;A.moveT=.35;if(f.onG&&rand()<.5)f.pressDir('u');return;
   }
   // item
   if(A.item&&(!G.items.includes(A.item)||A.itemT<=0))A.item=null;
-  if(!A.item&&!f.attack&&Math.random()<C.item){
+  if(!A.item&&!f.attack&&rand()<C.item){
     let best=null,bd=1e9;
     for(const it of G.items){const w=it.type==='heal'?(f.hp<65?1:.25):1,d=(Math.abs(it.x-f.x)+Math.abs(it.y-f.y)*1.5)/w;if(d<260&&d<bd){bd=d;best=it}}
     if(best&&(dist>45||f.hp<50)){A.item=best;A.itemT=3}
@@ -3370,19 +3374,19 @@ function aiDecide(f,o,C){
     return;
   }
   // vertikal
-  if(dy<-45&&f.onG&&dist<120&&Math.random()<.7)f.pressDir('u');
+  if(dy<-45&&f.onG&&dist<120&&rand()<.7)f.pressDir('u');
   if(dy>45&&f.plat&&f.plat.ow&&dist<100)A.crouch=.5;
   // jarak
   const rng=f.weapon==='gun'?150:f.weapon==='sword'?46:34;
-  if(dist>rng+10)A.dx=Math.random()<C.aggr?toward:0;
-  else if(dist<rng-14&&Math.random()<.3)A.dx=-toward;
+  if(dist>rng+10)A.dx=rand()<C.aggr?toward:0;
+  else if(dist<rng-14&&rand()<.3)A.dx=-toward;
   else A.dx=0;
-  if(f.ult>=100&&dist<92&&!f.attack&&f.cd<=0&&Math.random()<C.atk){f.useUltimate();return}
+  if(f.ult>=100&&dist<92&&!f.attack&&f.cd<=0&&rand()<C.atk){f.useUltimate();return}
   if(f.attack||f.cd>0)return;
-  if(C.mix&&o.guard&&dist<34&&Math.abs(dy)<46&&Math.random()<C.mix){const th=AI_SEQ.find(q=>q.id==='throw');if(th){A.seq=th.s.map(x=>Object.assign({},x));A.seqT=0;return}}
-  if(f.weapon==='gun'&&f.ammo>0&&dist>60&&dist<270&&Math.abs(dy)<40&&Math.random()<.65){f.pressAttack(Math.random()<.5?'rh':'lh');return}
-  if(dist<=rng+16&&Math.abs(dy)<46&&Math.random()<C.atk){
-    if(Math.random()<C.combo){
+  if(C.mix&&o.guard&&dist<34&&Math.abs(dy)<46&&rand()<C.mix){const th=AI_SEQ.find(q=>q.id==='throw');if(th){A.seq=th.s.map(x=>Object.assign({},x));A.seqT=0;return}}
+  if(f.weapon==='gun'&&f.ammo>0&&dist>60&&dist<270&&Math.abs(dy)<40&&rand()<.65){f.pressAttack(rand()<.5?'rh':'lh');return}
+  if(dist<=rng+16&&Math.abs(dy)<46&&rand()<C.atk){
+    if(rand()<C.combo){
       const opts=AI_SEQ.filter(q=>dist>=q.min&&dist<=q.max);
       if(opts.length){const q=opts[rint(0,opts.length-1)];A.seq=q.s.map(x=>Object.assign({},x));A.seqT=0;return}
     }
@@ -3411,7 +3415,8 @@ function mirrorCos(base){
 function startMatch(id,train,chosenFoe,story){
   selId=id;const foeId=chosenFoe&&CHARS[chosenFoe]?chosenFoe:foeOf(id);foeSelId=foeId;const mine=CHARS[id],mirror=foeId===id,foe=mirror?Object.assign(Object.create(Object.getPrototypeOf(CHARS[foeId])),CHARS[foeId],{name:CHARS[foeId].name+' 2'}):CHARS[foeId];
   WORLD_W=mapPick==='port'?PORT_W:720;
-  G={sel:id,foeSel:foeId,map:mapPick,crates:mapPick==='port'?makePortCrates():[],p:new Fighter(mine,true),e:new Fighter(foe,false),phase:'intro',introT:0,cT:0,cN:-1,fT:0,time:0,timer:60,round:1,score:[0,0],items:[],proj:[],movers:[],parts:[],shake:0,hitStop:0,cam:0,pop:null,koT:0,itemT:6,rw:null,koWhy:'',confT:0};
+  const matchSeed=((Date.now()>>>0)^((performance.now()*1000)>>>0)^((Math.random()*0xffffffff)>>>0))>>>0;seedRng(matchSeed);
+  G={seed:matchSeed,sel:id,foeSel:foeId,map:mapPick,crates:mapPick==='port'?makePortCrates():[],p:new Fighter(mine,true),e:new Fighter(foe,false),phase:'intro',introT:0,cT:0,cN:-1,fT:0,time:0,timer:60,round:1,score:[0,0],items:[],proj:[],movers:[],parts:[],shake:0,hitStop:0,cam:0,pop:null,koT:0,itemT:6,rw:null,koWhy:'',confT:0};
   if(mirror){if(lastPick==='me')G.p.co=mirrorCos(COS[id]);else G.e.co=mirrorCos(COS[id])}/* lawan diri sendiri: warna dibedakan */
   if(story){G.story=story;G.sdiff=story.diff}
   G.vs2=!!vs2p&&!train&&!story;if(G.vs2){G.e.ai=null;G.e.ctl=Input2.held}G.split=!!G.vs2&&!(NET.role==='host'&&NET.conn);/* V62: Player 2 menggantikan AI */
@@ -3514,7 +3519,7 @@ function separate(a,b){if(a.gb||b.gb)return;
 }
 function spawnItem(){
   const g=G,types=['sword','gun','disc','heal','speed'],wts=[.26,.22,.2,.16,.16];
-  let t,tries=0;do{let r=Math.random(),i=0;for(;i<4;i++){r-=wts[i];if(r<=0)break}t=types[i];tries++}while(g.items.some(it=>it.type===t)&&tries<8);
+  let t,tries=0;do{let r=rand(),i=0;for(;i<4;i++){r-=wts[i];if(r<=0)break}t=types[i];tries++}while(g.items.some(it=>it.type===t)&&tries<8);
   const free=curSpawns().filter(s=>!g.items.some(it=>Math.abs(it.x-s.x)<60&&Math.abs(it.y-s.y)<30));
   if(!free.length)return;const sp=free[rint(0,free.length-1)];
   g.items.push({type:t,x:sp.x,y:sp.y,t:0,life:14});
@@ -3774,8 +3779,8 @@ function update(dtIn){
   for(let i=g.proj.length-1;i>=0;i--){
     const pr=g.proj[i];pr.x+=pr.vx*dt;pr.y+=(pr.vy||0)*dt;pr.t+=dt;const tg=pr.o===g.p?g.e:g.p;let dead=pr.t>pr.life||pr.x<0||pr.x>WORLD_W;
     if(pr.boom){if(!pr.rev&&pr.t>.45){pr.rev=1;pr.done=0;pr.h=pr.h2;if(pr.wave===2)fireTurn(pr)}if(pr.rev){const dx=pr.o.x-pr.x;pr.vx=Math.sign(dx||1)*300;pr.y+=((pr.o.y-22)-pr.y)*Math.min(1,dt*6);if(Math.abs(dx)<12){dead=true;if(pr.wave===2)fireCatch(pr)}}}
-    if(pr.wave===2){flameFx(pr.x-(Math.sign(pr.vx)||1)*5,pr.y+rnd(-5,5),pr.rev?3:2,5,pr.rev?5:4);if(Math.random()<.5)burst(pr.x,pr.y+rnd(-9,9),1,['#ffd040','#fff2b0','#ff5a14'],80,.35,-50)}
-    if((pr.wave===1||pr.wave===3)&&Math.random()<.9){const cl=pr.wave===3?['#bfe8ff','#ffffff','#70eaff']:['#ffe9a0','#ffffff','#bfe8ff'];burst(pr.x-pr.f*4,pr.y+rnd(-24,24),2,cl,40,.4,-30);if(Math.random()<.18)starFx(pr.x-pr.f*6,pr.y+rnd(-22,22),'#ffffff',3)}
+    if(pr.wave===2){flameFx(pr.x-(Math.sign(pr.vx)||1)*5,pr.y+rnd(-5,5),pr.rev?3:2,5,pr.rev?5:4);if(rand()<.5)burst(pr.x,pr.y+rnd(-9,9),1,['#ffd040','#fff2b0','#ff5a14'],80,.35,-50)}
+    if((pr.wave===1||pr.wave===3)&&rand()<.9){const cl=pr.wave===3?['#bfe8ff','#ffffff','#70eaff']:['#ffe9a0','#ffffff','#bfe8ff'];burst(pr.x-pr.f*4,pr.y+rnd(-24,24),2,cl,40,.4,-30);if(rand()<.18)starFx(pr.x-pr.f*6,pr.y+rnd(-22,22),'#ffffff',3)}
     if(!dead&&!pr.wave&&tg.weapon==='disc'&&Math.abs(pr.x-tg.x)<20&&Math.abs(pr.y-(tg.y-22))<18){dead=true;burst(pr.x,pr.y,6,['#c8e0ff','#ffffff'],90,.3,0);floatText(tg.x,tg.y-44,'BLOCK','#c8e0ff');sfx('click')}
     const pw=pr.w||6,ph=pr.hh||6;
     if(!dead&&pr.web&&tg.canBeHit()&&ov({x:pr.x-pw/2,y:pr.y-ph/2,w:pw,h:ph},tg.hurt())){dead=true;if(tg.guard){floatText(tg.x,tg.y-44,'BLOCK','#c8e0ff');burst(pr.x,pr.y,6,['#ffffff','#c8e0ff'],80,.3,0);sfx('click')}else tg.webBind(pr.o,pr.bt||1.5)}
@@ -4682,13 +4687,20 @@ function resize(){
   for(const el of [canvas,ui]){el.style.left=l+'px';el.style.top=t+'px';el.style.width=cw+'px';el.style.height=ch+'px'}
   document.documentElement.style.setProperty('--u',(Math.floor(VH*sc)/100)+'px');document.documentElement.style.setProperty('--ptop',canvas.height>VH?Math.round((SH-22)*sc)+'px':'');checkOrient();
 }
-let last=0;
+let last=0,simAccumulator=0;
+const SIM_DT=1/60,MAX_CATCHUP=5;
 function loop(ts){
   requestAnimationFrame(loop);
   if(last&&ts-last<10)return;/* V66: batasi ~60fps pada layar 120Hz */
   const real=Math.min(.05,(ts-last)/1000||0);last=ts;menuT+=real;
   try{
-    if(state==='play'||state==='result')update(real*S.speed);
+    if(state==='play'||state==='result'){
+      simAccumulator=Math.min(simAccumulator+real*S.speed,SIM_DT*MAX_CATCHUP);
+      let steps=0;
+      while(simAccumulator+1e-9>=SIM_DT&&steps<MAX_CATCHUP&&(state==='play'||state==='result')){
+        update(SIM_DT);simAccumulator-=SIM_DT;steps++;
+      }
+    }else simAccumulator=0;
     if(state==='dialog'&&dlg)dlgTick(real);
     syncWorld();syncCtrl();render();netTick();
   }catch(err){console.error(err)}
