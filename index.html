@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0b0b1e">
+<meta name="screen-orientation" content="landscape">
+<meta name="x5-orientation" content="landscape">
+<meta name="x5-fullscreen" content="true">
+<meta name="full-screen" content="yes">
+<meta name="browsermode" content="application">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>PIXEL FIGHTER: ADIT VS WALUYO</title><!-- V47: saat karakter sama, yang berubah warna = sisi yang baru ditekan -->
@@ -292,10 +298,13 @@ body.split #pauseBtn{left:calc(var(--u)*2.6);right:auto;top:var(--ptop,calc(var(
 #dpad i,#dpad2 i{border-radius:calc(var(--dp)*.05)}
 #dpad i.on,#dpad2 i.on{box-shadow:inset 0 -4px 0 rgba(0,0,0,.25),0 0 calc(var(--dp)*.08) rgba(255,208,64,.8)}
 .act{transition:transform .05s,filter .05s}
-#rot{position:fixed;inset:0;z-index:50;background:rgba(5,5,20,.96);display:none;flex-direction:column;align-items:center;justify-content:center;gap:20px;text-align:center;padding:20px;font-size:14px;line-height:1.6;color:#ffd040}
+#rot{position:fixed;inset:0;z-index:99999;background:#05050f;display:none;flex-direction:column;align-items:center;justify-content:center;gap:24px;text-align:center;padding:24px;font-size:16px;line-height:1.6;color:#ffd040;touch-action:none;pointer-events:auto}
 #rot.show{display:flex}
-#rot .phone{width:60px;height:34px;border:4px solid #fff;border-radius:6px;animation:rotp 2s steps(8) infinite}
-@keyframes rotp{0%{transform:rotate(90deg)}50%,100%{transform:rotate(0)}}
+@media (orientation:portrait) and (pointer:coarse){#rot{display:flex}}
+#rot .phone{width:84px;height:48px;border:5px solid #fff;border-radius:9px;position:relative;animation:rotp 2s ease-in-out infinite}
+#rot .phone:after{content:'';position:absolute;right:5px;top:50%;width:5px;height:14px;margin-top:-7px;background:#ffd040;border-radius:2px}
+#rot small{font-size:11px;color:#9fb0ff;letter-spacing:.1em}
+@keyframes rotp{0%,15%{transform:rotate(90deg)}55%,100%{transform:rotate(0)}}
 /* V48: STORY MODE */
 .log-panel{height:min(92%,calc(var(--u)*88));gap:calc(var(--u)*1.2)}
 .log-tabs{display:flex;gap:calc(var(--u)*.9);flex-wrap:wrap;justify-content:center}
@@ -625,7 +634,7 @@ body.netclient #pauseBtn,body.netclient #trainBar{display:none!important}
   <div id="toast"></div><div id="netMsg"></div><div id="netHud"></div>
 </div>
 
-<div id="rot"><div>PUTAR PERANGKAT KE MODE LANDSCAPE<br>UNTUK BERMAIN</div><div class="phone"></div><button class="btn sm" data-act="rot-ok" style="font-size:12px;padding:10px 16px">LANJUTKAN</button></div>
+<div id="rot"><div>PUTAR HP KAMU KE MODE LANDSCAPE<br>UNTUK BERMAIN</div><div class="phone"></div><small>AKTIFKAN AUTO-ROTATE JIKA TIDAK BERPUTAR</small></div>
 
 <script>
 (()=>{
@@ -3656,7 +3665,7 @@ function aiDecide(f,o,C){
    ===================================================================== */
 /* ---------- permainan ---------- */
 let vs2p=false;/* V62: true = lawan dikendalikan Player 2 */
-let state='menu',returnTo='menu',G=null,menuT=0,selId='adit',foeSelId='waluyo',cosChar='adit',cosPart=0,rotDismissed=false,mapPick='meadow';
+let state='menu',returnTo='menu',G=null,menuT=0,selId='adit',foeSelId='waluyo',cosChar='adit',cosPart=0,mapPick='meadow';
 const SES={adit:0,waluyo:0,spiderman:0,boge:0};
 const isTouch=('ontouchstart' in window)||(navigator.maxTouchPoints>0)||(window.matchMedia&&matchMedia('(pointer:coarse)').matches);
 
@@ -4581,8 +4590,7 @@ const SET_ROWS=[
  {k:'speed',l:'KECEPATAN GAME',t:'range',min:.7,max:1.4,step:.05,f:v=>v.toFixed(2)+'X'},
  {k:'ctrlSize',l:'UKURAN KONTROL',t:'range',min:.7,max:1.5,step:.05,f:v=>Math.round(v*100)+'%'},
  {k:'ctrlOpa',l:'OPASITAS TOMBOL',t:'range',min:.2,max:1,step:.05,f:v=>Math.round(v*100)+'%'},
- {k:'fx',l:'EFEK VISUAL',t:'cyc',o:['FULL','LOW','OFF']},
- {k:'orient',l:'PETUNJUK LANDSCAPE',t:'tog'}];
+ {k:'fx',l:'EFEK VISUAL',t:'cyc',o:['FULL','LOW','OFF']}];
 function buildSettingsUI(){
   $('setRows').innerHTML=SET_ROWS.map((r,i)=>{
     let ctl='';
@@ -4628,24 +4636,45 @@ function buildComboList(){
 }
 function pauseGame(){if(NET.lock){if(state==='play'&&G&&G.phase!=='end')NET.wantPause=true;return}if(state!=='play'||!G||G.phase==='end')return;returnTo='pause';sfx('click');buildComboList();go('pause')}
 function resumeGame(){if(NET.lock){if(state==='pause'){netSend('R');go('play')}return}if(state!=='pause')return;go('play')}
+/* ===== LANDSCAPE PENUH (semua layar & mode) ===== */
+function isFS(){return !!(document.fullscreenElement||document.webkitFullscreenElement||document.msFullscreenElement)}
+function lockLand(){
+  try{
+    const o=screen.orientation;
+    if(o&&o.lock){const r=o.lock('landscape');if(r&&r.catch)r.catch(()=>{})}
+    else{const f=screen.lockOrientation||screen.mozLockOrientation||screen.msLockOrientation;if(f)f.call(screen,'landscape')}
+  }catch(e){}
+}
 function tryLandscape(){
   if(!isTouch)return;
-  try{const el=document.documentElement,p=el.requestFullscreen?el.requestFullscreen():null;
-    const lock=()=>{try{const r=screen.orientation&&screen.orientation.lock&&screen.orientation.lock('landscape');if(r&&r.catch)r.catch(()=>{})}catch(e){}};
-    if(p&&p.then)p.then(lock).catch(()=>{});else lock()}catch(e){}
+  lockLand();
+  try{
+    if(!isFS()){
+      const el=document.documentElement,rq=el.requestFullscreen||el.webkitRequestFullscreen||el.msRequestFullscreen;
+      if(rq){const p=rq.call(el,{navigationUI:'hide'});if(p&&p.then)p.then(lockLand).catch(()=>{});else setTimeout(lockLand,150)}
+    }
+  }catch(e){}
 }
-/* V65: potret HANYA untuk pertarungan 2 pemain (split atas-bawah); menu & mode lain tetap landscape */
-let oriFree=false;
-const portraitOK=()=>false;/* APK: selalu landscape, 2P split tetap di landscape */
-function syncOrientLock(){
-  if(!isTouch)return;const ok=portraitOK();if(ok===oriFree)return;oriFree=ok;
-  try{if(ok){if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();
-      if(innerWidth>innerHeight)toast('PUTAR HP KE POTRET UNTUK 2 PEMAIN')}
-    else{const r=screen.orientation&&screen.orientation.lock&&screen.orientation.lock('landscape');if(r&&r.catch)r.catch(()=>{})}}catch(e){}
-}
+function syncOrientLock(){if(isTouch)lockLand()}
 function checkOrient(){
-  const portrait=innerHeight>innerWidth;if(!portrait)rotDismissed=false;
-  $('rot').classList.toggle('show',!!S.orient&&isTouch&&portrait&&!rotDismissed&&!portraitOK());
+  const ov=$('rot');if(!ov)return;
+  const portrait=isTouch&&innerHeight>innerWidth;
+  ov.classList.toggle('show',portrait);
+  if(portrait){
+    Input.clear();Input2.clear();NetLocal.clear();
+    if(state==='play'&&G&&G.phase!=='end')pauseGame();
+  }
+}
+function setupLandscape(){
+  if(!isTouch)return;
+  lockLand();/* coba kunci sejak game dibuka (berhasil di PWA/APK/browser yang mengizinkan) */
+  /* browser biasa mewajibkan gestur pengguna untuk fullscreen: sentuhan pertama di mana saja (tanpa tombol MULAI) langsung mengaktifkan fullscreen + kunci landscape */
+  ['pointerup','touchend','click'].forEach(ev=>document.addEventListener(ev,()=>{if(!isFS())tryLandscape();else lockLand()},{capture:true,passive:true}));
+  const onFS=()=>{lockLand();setTimeout(resize,60);setTimeout(resize,300)};
+  document.addEventListener('fullscreenchange',onFS);document.addEventListener('webkitfullscreenchange',onFS);
+  try{if(screen.orientation&&screen.orientation.addEventListener)screen.orientation.addEventListener('change',()=>{setTimeout(resize,60);setTimeout(resize,300)})}catch(e){}
+  if(window.visualViewport)visualViewport.addEventListener('resize',resize);
+  window.addEventListener('pageshow',()=>{lockLand();resize()});
 }
 function onClick(e){
   const b=e.target.closest&&e.target.closest('[data-act]');if(!b)return;
@@ -4698,7 +4727,6 @@ function onClick(e){
    case 'story-list':G=null;go('chapters');break;
    case 'dg-next':dlgNext();break;
    case 'dg-skip':if(dlg)dlgEnd();break;
-   case 'rot-ok':rotDismissed=true;checkOrient();break;
   }
 }
 
@@ -4936,7 +4964,7 @@ function bindEvents(){
   document.addEventListener('keyup',e=>{if(KEYMAP[e.code]||K2P1[e.code]||K2P2[e.code]){Input.set('k'+e.code,[]);Input2.set('k'+e.code,[]);if(state==='play')e.preventDefault()}});
   window.addEventListener('blur',()=>{Input.clear();Input2.clear();NetLocal.clear();if(state==='play')pauseGame()});
   document.addEventListener('visibilitychange',()=>{if(NET.lock)netSend(document.hidden?'B1':'B0');if(document.hidden){Input.clear();Input2.clear();NetLocal.clear();if(state==='play')pauseGame();if(Aud.ctx&&Aud.ctx.state==='running')Aud.ctx.suspend()}else if(Aud.ctx&&Aud.ctx.state==='suspended')Aud.ctx.resume()});
-  window.addEventListener('resize',resize);window.addEventListener('orientationchange',()=>setTimeout(resize,150));
+  window.addEventListener('resize',resize);window.addEventListener('orientationchange',()=>{setTimeout(resize,100);setTimeout(resize,400)});
   document.addEventListener('contextmenu',e=>e.preventDefault());
   document.addEventListener('touchmove',e=>{if(e.target&&e.target.tagName==='INPUT')return;if(e.target&&e.target.closest&&e.target.closest('#logBody'))return;e.preventDefault()},{passive:false});
   document.addEventListener('gesturestart',e=>e.preventDefault());
@@ -4987,7 +5015,7 @@ document.addEventListener('visibilitychange',()=>{
 function init(){
   buildLayers();buildP2Controls();buildIcons();buildCostumeUI();buildSettingsUI();buildComboList();bindControls();bindControls2();bindEvents();
   if(isTouch)document.body.classList.add('touchui');
-  applySettings();resize();go('menu');requestAnimationFrame(loop);
+  setupLandscape();applySettings();resize();go('menu');checkOrient();requestAnimationFrame(loop);
 }
 init();
 })();
