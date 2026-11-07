@@ -2000,7 +2000,7 @@ const dpPtr=new Set();
 const dpPtr2=new Set();
 const Input2=Object.assign(Object.create(Input),{edge(a){onEdge2(a)},cnt:{},src:new Map(),held:{l:0,r:0,u:0,d:0,lh:0,rh:0,lf:0,rf:0},
  clear(){this.src.clear();this.cnt={};for(const k in this.held)this.held[k]=0;dpPtr2.clear()}});/* V62: input Player 2 */
-/* ===== MULTIPLAYER (hotspot) ===== */
+/* ===== MULTIPLAYER (local simulation / bidirectional input) ===== */
 const NET={role:null,conn:false,lastF:0,img:null,remote:'',pl:null,busy:false,seed:0,remoteApplying:false,localSources:new Map(),frame:0};
 window.__pfdbg=()=>({role:NET.role,conn:NET.conn,vs2p,state,seed:NET.seed,rngState:RNG_STATE,frame:NET.frame,leave:netLeave,inp:Input,game:G&&{phase:G.phase,p1:G.p&&G.p.hp,p2:G.e&&G.e.hp}});
 function netNative(){try{return !!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform())}catch(e){return false}}
@@ -2011,14 +2011,20 @@ function netSend(m){if(NET.conn&&NET.pl)try{NET.pl.send({data:m})}catch(e){}}
  Input.prs=function(a){basePrs.call(this,a);if(NET.role==='host'&&NET.conn&&this===Input&&this.cnt[a]===1)netSend('p'+a)};
  Input.rel=function(a){baseRel.call(this,a);if(NET.role==='host'&&NET.conn&&this===Input&&!this.cnt[a])netSend('r'+a)};
  Input.set=function(src,acts){
-   if(NET.role==='client'&&this===Input&&!NET.remoteApplying){
-     const next=acts||[],keys=['l','r','u','d','lh','rh','lf','rf','ult'],before={};
-     for(const a of keys)before[a]=!!Input2.held[a];
-     const result=Input2.set(src,next);
-     for(const a of keys){const after=!!Input2.held[a];if(after!==before[a])netSend((after?'P':'R')+a)}
-     return result;
-   }
+   /* Di client, kontrol utama dipetakan ke P2 lokal; wrapper Input2.set
+      yang mengirim perubahan input tepat satu kali ke host. */
+   if(NET.role==='client'&&this===Input&&!NET.remoteApplying)return Input2.set(src,acts||[]);
    return baseSet.call(this,src,acts);
+ };
+ const input2BaseSet=baseSet;
+ Input2.set=function(src,acts){
+   const keys=['l','r','u','d','lh','rh','lf','rf','ult'],before={};
+   if(NET.role==='client'&&!NET.remoteApplying)for(const a of keys)before[a]=!!this.held[a];
+   const result=input2BaseSet.call(this,src,acts||[]);
+   if(NET.role==='client'&&NET.conn&&!NET.remoteApplying){
+     for(const a of keys){const after=!!this.held[a];if(after!==before[a])netSend((after?'P':'R')+a)}
+   }
+   return result;
  };
  NET.applyHostInput=function(a,down){NET.remoteApplying=true;try{baseSet.call(Input,'host:'+a,down?[a]:[])}finally{NET.remoteApplying=false}};
 })();
@@ -2030,11 +2036,12 @@ function netStatus(st){
     else if(NET.role==='client'){netClientEnter()}}
   else if(st==='closed'){const was=NET.conn;NET.conn=false;
     if(NET.role==='host'){netInfo('Teman terputus. Menunggu koneksi baru...');toast('KONEKSI PUTUS')}
-    else if(NET.role==='client'&&was){toast('KONEKSI PUTUS');netLeave()}}
+    else if(NET.role==='client'&&was){Input.clear();Input2.clear();toast('KONEKSI PUTUS');netLeave()}}
 }
 function netRecv(m){if(!m)return;const c=m[0],b=m.slice(1);
   if(NET.role==='host'){
     if(c==='P')Input2.set('net:'+b,[b]);else if(c==='R')Input2.set('net:'+b,[]);
+    else if(c==='Q'){if(b==='pause')pauseGame();else if(b==='play')resumeGame()}
   }else if(NET.role==='client'){
     if(c==='p')NET.applyHostInput(b,true);else if(c==='r')NET.applyHostInput(b,false);
     else if(c==='J'){
@@ -2044,7 +2051,11 @@ function netRecv(m){if(!m)return;const c=m[0],b=m.slice(1);
       NET.remote=b;
       if(b==='pause'&&state==='play')go('pause');
       else if(b==='play'&&state==='pause')go('play');
-      else if(b==='menu'&&state==='netplay')netMsg('MENUNGGU HOST MEMILIH PETARUNG...');
+      else if(b==='result'&&G&&state!=='result')go('result');
+      else if(b==='menu'&&(state==='netplay'||state==='play'||state==='pause'||state==='result')){
+        if(state!=='netplay'){G=null;Input.clear();Input2.clear();state='netplay';for(const n of SCREENS){const el=$('sc-'+n);if(el)el.classList.remove('show')}}
+        netMsg('MENUNGGU HOST MEMILIH PETARUNG...');
+      }
     }
   }}
 function netClientEnter(){NET.img=null;state='netplay';for(const n of SCREENS){const el=$('sc-'+n);if(el)el.classList.remove('show')}
@@ -4383,8 +4394,8 @@ function buildComboList(){
    '<div class="leg2">'+one('J')+'Pukul kiri '+one('K')+'Pukul kanan '+one('U')+'Tendang kiri '+one('I')+'Tendang kanan '+
    one('HIT')+'Harus kena '+one('MAJU2')+'Tekan 2x <span class="sl">/</span> Atau <span class="pl">+</span> Bersamaan <span class="ar">›</span> Lanjut</div>';
 }
-function pauseGame(){if(state!=='play'||!G||G.phase==='end')return;returnTo='pause';sfx('click');buildComboList();go('pause')}
-function resumeGame(){if(state!=='pause')return;go('play')}
+function pauseGame(){if(NET.role==='client'&&NET.conn){netSend('Qpause');return}if(state!=='play'||!G||G.phase==='end')return;returnTo='pause';sfx('click');buildComboList();go('pause')}
+function resumeGame(){if(NET.role==='client'&&NET.conn){netSend('Qplay');return}if(state!=='pause')return;go('play')}
 function tryLandscape(){
   if(!isTouch)return;
   try{const el=document.documentElement,p=el.requestFullscreen?el.requestFullscreen():null;
