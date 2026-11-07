@@ -37,16 +37,23 @@ jobs:
         run: |
           M=android/app/src/main/AndroidManifest.xml
           sed -i 's/<activity /<activity android:screenOrientation="sensorLandscape" /' $M
+          grep -q "permission.INTERNET" $M || sed -i 's#</manifest>#<uses-permission android:name="android.permission.INTERNET" /></manifest>#' $M
+          grep -q "ACCESS_WIFI_STATE" $M || sed -i 's#</manifest>#<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" /></manifest>#' $M
           S=android/app/src/main/res/values/styles.xml
           sed -i 's#<item name="windowActionBar">false</item>#<item name="windowActionBar">false</item><item name="android:windowFullscreen">true</item><item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>#' $S
           F=$(find android/app/src/main/java -name MainActivity.java)
           grep '^package' $F > /tmp/M.java
           cat >> /tmp/M.java <<'JEOF'
+          import android.os.Bundle;
           import androidx.core.view.WindowCompat;
           import androidx.core.view.WindowInsetsCompat;
           import androidx.core.view.WindowInsetsControllerCompat;
           import com.getcapacitor.BridgeActivity;
           public class MainActivity extends BridgeActivity {
+            @Override public void onCreate(Bundle savedInstanceState) {
+              registerPlugin(NetPlugin.class);
+              super.onCreate(savedInstanceState);
+            }
             @Override public void onWindowFocusChanged(boolean hasFocus) {
               super.onWindowFocusChanged(hasFocus);
               if (hasFocus) {
@@ -57,6 +64,169 @@ jobs:
             }
           }
           JEOF
+          # Plugin jaringan (soket TCP) untuk multiplayer hotspot
+          D=$(dirname $F)
+          grep '^package' $F > $D/NetPlugin.java
+          cat >> $D/NetPlugin.java <<'PEOF'
+          import com.getcapacitor.JSArray;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import java.io.BufferedReader;
+          import java.io.InputStreamReader;
+          import java.io.OutputStream;
+          import java.net.Inet4Address;
+          import java.net.InetAddress;
+          import java.net.InetSocketAddress;
+          import java.net.NetworkInterface;
+          import java.net.ServerSocket;
+          import java.net.Socket;
+          import java.nio.charset.StandardCharsets;
+          import java.util.Collections;
+          import java.util.concurrent.ExecutorService;
+          import java.util.concurrent.Executors;
+          import java.util.concurrent.atomic.AtomicInteger;
+
+          @CapacitorPlugin(name = "Net")
+          public class NetPlugin extends Plugin {
+            private ServerSocket server;
+            private volatile Socket sock;
+            private volatile OutputStream out;
+            private final ExecutorService sender = Executors.newSingleThreadExecutor();
+            private final AtomicInteger pending = new AtomicInteger();
+
+            @PluginMethod
+            public void getIps(PluginCall call) {
+              JSArray arr = new JSArray();
+              try {
+                for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                  if (!ni.isUp() || ni.isLoopback()) continue;
+                  String n = ni.getName();
+                  if (n.startsWith("rmnet") || n.startsWith("ccmni") || n.startsWith("dummy") || n.startsWith("tun")) continue;
+                  for (InetAddress a : Collections.list(ni.getInetAddresses())) {
+                    if (a instanceof Inet4Address) arr.put(a.getHostAddress());
+                  }
+                }
+              } catch (Exception e) { }
+              JSObject r = new JSObject();
+              r.put("ips", arr);
+              call.resolve(r);
+            }
+
+            @PluginMethod
+            public void startServer(final PluginCall call) {
+              closeAll();
+              final int port = call.getInt("port", 8765);
+              try {
+                server = new ServerSocket();
+                server.setReuseAddress(true);
+                server.bind(new InetSocketAddress(port));
+              } catch (Exception e) {
+                call.reject("Port " + port + " tidak bisa dibuka: " + e.getMessage());
+                return;
+              }
+              final ServerSocket ss = server;
+              new Thread(new Runnable() {
+                public void run() {
+                  while (!ss.isClosed()) {
+                    try {
+                      Socket s = ss.accept();
+                      attach(s);
+                      readLoop(s);
+                    } catch (Exception e) {
+                      if (ss.isClosed()) break;
+                    }
+                  }
+                }
+              }).start();
+              call.resolve();
+            }
+
+            @PluginMethod
+            public void connect(final PluginCall call) {
+              closeAll();
+              final String host = call.getString("host");
+              final int port = call.getInt("port", 8765);
+              new Thread(new Runnable() {
+                public void run() {
+                  Socket s = new Socket();
+                  try {
+                    s.connect(new InetSocketAddress(host, port), 6000);
+                  } catch (Exception e) {
+                    call.reject("" + e.getMessage());
+                    return;
+                  }
+                  attach(s);
+                  call.resolve();
+                  readLoop(s);
+                }
+              }).start();
+            }
+
+            private void attach(Socket s) {
+              try { s.setTcpNoDelay(true); } catch (Exception e) { }
+              try { if (sock != null) sock.close(); } catch (Exception e) { }
+              sock = s;
+              try { out = s.getOutputStream(); } catch (Exception e) { out = null; }
+              JSObject o = new JSObject();
+              o.put("s", "connected");
+              notifyListeners("status", o);
+            }
+
+            private void readLoop(Socket s) {
+              try {
+                BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8), 65536);
+                String line;
+                while ((line = br.readLine()) != null) {
+                  JSObject o = new JSObject();
+                  o.put("data", line);
+                  notifyListeners("msg", o);
+                }
+              } catch (Exception e) { }
+              if (sock == s) {
+                JSObject o = new JSObject();
+                o.put("s", "closed");
+                notifyListeners("status", o);
+              }
+              try { s.close(); } catch (Exception e) { }
+            }
+
+            @PluginMethod
+            public void send(PluginCall call) {
+              final String d = call.getString("data");
+              call.resolve();
+              if (d == null || out == null) return;
+              boolean frame = d.startsWith("F");
+              if (frame && pending.get() > 2) return;
+              pending.incrementAndGet();
+              sender.execute(new Runnable() {
+                public void run() {
+                  try {
+                    OutputStream o = out;
+                    if (o != null) {
+                      o.write((d + "\n").getBytes(StandardCharsets.UTF_8));
+                      o.flush();
+                    }
+                  } catch (Exception e) { }
+                  pending.decrementAndGet();
+                }
+              });
+            }
+
+            private void closeAll() {
+              try { if (sock != null) { Socket s = sock; sock = null; out = null; s.close(); } } catch (Exception e) { }
+              try { if (server != null) { server.close(); server = null; } } catch (Exception e) { }
+            }
+
+            @PluginMethod
+            public void close(PluginCall call) {
+              closeAll();
+              call.resolve();
+            }
+          }
+          PEOF
           cp /tmp/M.java $F
 
       # Kunci tanda tangan TETAP -> APK baru bisa menimpa yang lama tanpa uninstall
