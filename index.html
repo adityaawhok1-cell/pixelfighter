@@ -667,7 +667,6 @@ const ZM={delay:.6,dur:1.5,pause:.7,hold:1.4,out:.8,Z:1.6,dy:.47};ZM.text=ZM.del
 /* V13: Waluyo 'JOS JIS!!!' - t0 = detik (sejak kemenangan) saat jempol menghentak, hold = lama pose ditahan, ex = tambahan jeda sebelum zoom-out ronde biasa */
 const JOS={t0:ZM.text-.1,hold:2.5,ex:0};JOS.ex=JOS.t0+JOS.hold-ZM.out0;
 const $=id=>document.getElementById(id);
-/* PRNG seeded: fondasi replay/sinkronisasi. Seed di-reset setiap match. */
 let RNG_STATE=0x6d2b79f5;
 function seedRng(seed){RNG_STATE=(seed>>>0)||0x6d2b79f5;return RNG_STATE}
 function rand(){let t=RNG_STATE+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296}
@@ -1848,9 +1847,9 @@ const Aud={lt:{},rvIn:null,ctx:null,mg:null,mf:null,dIn:null,sg:null,nb:null,mod
  init(){if(this.ctx){if(this.ctx.state==='suspended')this.ctx.resume();return}
   try{const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;const c=this.ctx=new AC();
    this.mg=c.createGain();this.sg=c.createGain();this.mf=c.createGain();this.mf.gain.value=0;this.mg.connect(this.mf);this.mf.connect(c.destination);{/* V59 TAHAP 5: limiter ringan agar SFX berlapis tetap tebal & tidak pecah */const cp=c.createDynamicsCompressor();cp.threshold.value=-13;cp.knee.value=8;cp.ratio.value=6;cp.attack.value=.003;cp.release.value=.14;this.sg.connect(cp);cp.connect(c.destination)}
-   {/* reverb pendek untuk ultimate / KO / slam */const len=c.sampleRate*1|0,ir=c.createBuffer(2,len,c.sampleRate);for(let h=0;h<2;h++){const dd=ir.getChannelData(h);for(let i=0;i<len;i++)dd[i]=(rand()*2-1)*Math.pow(1-i/len,2.6)}const cv=c.createConvolver();cv.buffer=ir;const wg=c.createGain();wg.gain.value=.5;cv.connect(wg);wg.connect(this.sg);this.rvIn=cv}
+   {/* reverb pendek untuk ultimate / KO / slam */const len=c.sampleRate*1|0,ir=c.createBuffer(2,len,c.sampleRate);for(let h=0;h<2;h++){const dd=ir.getChannelData(h);for(let i=0;i<len;i++)dd[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.6)}const cv=c.createConvolver();cv.buffer=ir;const wg=c.createGain();wg.gain.value=.5;cv.connect(wg);wg.connect(this.sg);this.rvIn=cv}
    {/* echo dotted-eighth untuk lead menu */const dly=c.createDelay(1),fb=c.createGain(),dIn=c.createGain();dIn.gain.value=.26;dly.delayTime.value=60/MBPM*.75;fb.gain.value=.34;dIn.connect(dly);dly.connect(fb);fb.connect(dly);dly.connect(this.mg);this.dIn=dIn;this.dly=dly}
-   const b=c.createBuffer(1,c.sampleRate*.4,c.sampleRate),d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=rand()*2-1;this.nb=b;
+   const b=c.createBuffer(1,c.sampleRate*.4,c.sampleRate),d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;this.nb=b;
    this.apply();this.nextT=c.currentTime+.1;this.fadeTo(1,this.mode==='main'?1.6:.4);this.timer=setInterval(()=>this.sched(),30);if(c.state==='suspended')c.resume()}catch(e){}},
  fadeTo(v,dur){const c=this.ctx;if(!c||!this.mf)return;const t=c.currentTime,g=this.mf.gain;g.cancelScheduledValues(t);g.setValueAtTime(g.value,t);g.linearRampToValueAtTime(v,t+dur)},
  /* ganti musik: fade-out singkat, urutan mulai dari awal, fade-in (menu utama lebih lembut). Memanggil mode yang sama = tidak melakukan apa pun (tidak bertumpuk / tidak restart). */
@@ -1936,7 +1935,7 @@ const Aud={lt:{},rvIn:null,ctx:null,mg:null,mf:null,dIn:null,sg:null,nb:null,mod
   if(o.rv&&this.rvIn){const r=c.createGain();r.gain.value=o.rv;g.connect(r);r.connect(this.rvIn)}os.start(t);os.stop(t+dur+.03)},
  nx(t,dur,v,fc,fc2,o){o=o||{};const c=this.ctx,s=c.createBufferSource(),fl=c.createBiquadFilter(),g=c.createGain();s.buffer=this.nb;s.loop=true;fl.type=o.ft||'bandpass';fl.Q.value=o.q||.9;fl.frequency.setValueAtTime(fc,t);if(fc2)fl.frequency.exponentialRampToValueAtTime(Math.max(30,fc2),t+dur);
   g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(v,t+(o.atk||.002));g.gain.exponentialRampToValueAtTime(.001,t+dur);s.connect(fl);fl.connect(g);g.connect(this.sg);
-  if(o.rv&&this.rvIn){const r=c.createGain();r.gain.value=o.rv;g.connect(r);r.connect(this.rvIn)}s.start(t,rand()*.2);s.stop(t+dur+.03)},
+  if(o.rv&&this.rvIn){const r=c.createGain();r.gain.value=o.rv;g.connect(r);r.connect(this.rvIn)}s.start(t,Math.random()*.2);s.stop(t+dur+.03)},
  imp(t,w){/* V60: impact arcade ringan — soft thump + airy snap, tanpa crack tajam / bass berlebihan */
   const heavy=w>=2,very=w>=3;
   this.nx(t,.035,heavy?.22:.14,2800,4200,{ft:'highpass',q:.65});
@@ -2002,14 +2001,27 @@ const dpPtr2=new Set();
 const Input2=Object.assign(Object.create(Input),{edge(a){onEdge2(a)},cnt:{},src:new Map(),held:{l:0,r:0,u:0,d:0,lh:0,rh:0,lf:0,rf:0},
  clear(){this.src.clear();this.cnt={};for(const k in this.held)this.held[k]=0;dpPtr2.clear()}});/* V62: input Player 2 */
 /* ===== MULTIPLAYER (hotspot) ===== */
-const NET={role:null,conn:false,lastF:0,img:null,remote:'',pl:null,busy:false};
-window.__pfdbg=()=>({role:NET.role,conn:NET.conn,vs2p,state,leave:netLeave,inp:Input,seed:G&&G.seed,rngState:RNG_STATE,simDt:SIM_DT});
+const NET={role:null,conn:false,lastF:0,img:null,remote:'',pl:null,busy:false,seed:0,remoteApplying:false,localSources:new Map(),frame:0};
+window.__pfdbg=()=>({role:NET.role,conn:NET.conn,vs2p,state,seed:NET.seed,rngState:RNG_STATE,frame:NET.frame,leave:netLeave,inp:Input,game:G&&{phase:G.phase,p1:G.p&&G.p.hp,p2:G.e&&G.e.hp}});
 function netNative(){try{return !!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform())}catch(e){return false}}
 function netPlugin(){if(!NET.pl){try{const C=window.Capacitor;let P;if(typeof C.registerPlugin==='function'){P=C.registerPlugin('Net');P.addListener('msg',e=>netRecv(e.data));P.addListener('status',e=>netStatus(e.s))}else{const call=m=>o=>C.nativePromise('Net',m,o||{});P={startServer:call('startServer'),getIps:call('getIps'),connect:call('connect'),send:call('send'),close:call('close')};C.addListener('Net','msg',e=>netRecv(e&&e.data));C.addListener('Net','status',e=>netStatus(e&&e.s))}NET.pl=P}catch(err){NET.pl=null}}return NET.pl}
 function netSend(m){if(NET.conn&&NET.pl)try{NET.pl.send({data:m})}catch(e){}}
-(function(){const _p=Input.prs,_r=Input.rel;
- Input.prs=function(a){_p.call(this,a);if(NET.role==='client'&&this===Input&&this.cnt[a]===1)netSend('P'+a)};
- Input.rel=function(a){_r.call(this,a);if(NET.role==='client'&&this===Input&&!this.cnt[a])netSend('R'+a)}})();
+(function(){
+ const baseSet=Input.set,basePrs=Input.prs,baseRel=Input.rel;
+ Input.prs=function(a){basePrs.call(this,a);if(NET.role==='host'&&NET.conn&&this===Input&&this.cnt[a]===1)netSend('p'+a)};
+ Input.rel=function(a){baseRel.call(this,a);if(NET.role==='host'&&NET.conn&&this===Input&&!this.cnt[a])netSend('r'+a)};
+ Input.set=function(src,acts){
+   if(NET.role==='client'&&this===Input&&!NET.remoteApplying){
+     const next=acts||[],keys=['l','r','u','d','lh','rh','lf','rf','ult'],before={};
+     for(const a of keys)before[a]=!!Input2.held[a];
+     const result=Input2.set(src,next);
+     for(const a of keys){const after=!!Input2.held[a];if(after!==before[a])netSend((after?'P':'R')+a)}
+     return result;
+   }
+   return baseSet.call(this,src,acts);
+ };
+ NET.applyHostInput=function(a,down){NET.remoteApplying=true;try{baseSet.call(Input,'host:'+a,down?[a]:[])}finally{NET.remoteApplying=false}};
+})();
 function netInfo(t){const el=$('netInfo');if(el)el.textContent=t}
 function netMsg(t){const el=$('netMsg');if(!el)return;el.textContent=t||'';el.style.display=t?'block':'none'}
 function netStatus(st){
@@ -2022,18 +2034,25 @@ function netStatus(st){
 }
 function netRecv(m){if(!m)return;const c=m[0],b=m.slice(1);
   if(NET.role==='host'){
-    if(c==='A'){netAck()}else if(c==='P'){if(G&&G.vs2)Input2.set('net:'+b,[b])}
-    else if(c==='R'){Input2.set('net:'+b,[])}
+    if(c==='P')Input2.set('net:'+b,[b]);else if(c==='R')Input2.set('net:'+b,[]);
   }else if(NET.role==='client'){
-    if(c==='F'){const im=new Image();im.onload=()=>{NET.img=im;netSend('A')};im.src='data:image/jpeg;base64,'+b}
-    else if(c==='S'){NET.remote=b;netMsg(b==='play'?'':b==='pause'?'HOST MEM-PAUSE':b==='result'?'':'MENUNGGU HOST MEMILIH PETARUNG...')}
+    if(c==='p')NET.applyHostInput(b,true);else if(c==='r')NET.applyHostInput(b,false);
+    else if(c==='J'){
+      let d;try{d=JSON.parse(b)}catch(e){return}
+      if(d&&d.t==='match'&&d.seed){NET.seed=d.seed>>>0;vs2p=true;mapPick=d.map||'meadow';S.speed=Number(d.speed)||1;NET.remoteApplying=true;try{startMatch(d.p1,d.p2,false,false);if(G)G.split=false;document.body.classList.remove('twop','split')}finally{NET.remoteApplying=false}netMsg('');}
+    }else if(c==='S'){
+      NET.remote=b;
+      if(b==='pause'&&state==='play')go('pause');
+      else if(b==='play'&&state==='pause')go('play');
+      else if(b==='menu'&&state==='netplay')netMsg('MENUNGGU HOST MEMILIH PETARUNG...');
+    }
   }}
 function netClientEnter(){NET.img=null;state='netplay';for(const n of SCREENS){const el=$('sc-'+n);if(el)el.classList.remove('show')}
   document.body.classList.add('playing','netclient','touchui');document.body.classList.remove('twop','split');netMsg('MENUNGGU HOST MEMILIH PETARUNG...')}
 function netLeave(){
   try{if(NET.pl)NET.pl.close()}catch(e){}
-  NET.role=null;NET.conn=false;NET.img=null;document.body.classList.remove('nethost','netclient','playing');netMsg('');
-  if(state==='netplay'){Input.clear();state='menu';go('menu')}}
+  NET.role=null;NET.conn=false;NET.img=null;NET.localSources.clear();document.body.classList.remove('nethost','netclient','playing');netMsg('');
+  if(state==='netplay'||state==='play'||state==='pause'||state==='result'){Input.clear();Input2.clear();G=null;state='menu';go('menu')}}
 async function netHost(){
   if(!netNative()){netInfo('Multiplayer hanya jalan di aplikasi APK, bukan di browser.');return}
   const pl=netPlugin();if(!pl){netInfo('Plugin jaringan tidak ditemukan. Pastikan APK dibuat dengan workflow terbaru.');return}
@@ -2046,17 +2065,14 @@ async function netJoin(){
   const pl=netPlugin();if(!pl){netInfo('Plugin jaringan tidak ditemukan. Pastikan APK dibuat dengan workflow terbaru.');return}
   LS.set('pf_netip',ip);netInfo('Menyambung ke '+ip+' ...');NET.role='client';
   try{await pl.connect({host:ip,port:8765})}catch(e){NET.role=null;netInfo('Gagal tersambung: '+(e&&e.message||e)+'. Cek IP & pastikan sama-sama di hotspot.')}}
-function netTick(){/* host: kirim frame ~30fps, resolusi penuh, kualitas adaptif */
-  if(NET.role!=='host'||!NET.conn||!(state==='play'||state==='pause'||state==='result'))return;
-  const n=performance.now();if(n-NET.lastF<33)return;if((NET.fly||0)>=3){if(n-NET.lastF<400)return;NET.fly=0;NET.ts=[]}NET.lastF=n;
-  try{if(NET.q==null)NET.q=.8;const u=canvas.toDataURL('image/jpeg',NET.q);NET.fly=(NET.fly||0)+1;(NET.ts||(NET.ts=[])).push(n);netSend('F'+u.slice(u.indexOf(',')+1))}catch(e){}}
-function netAck(){/* host: terima ACK, atur kualitas sesuai kecepatan jaringan */
-  NET.fly=Math.max(0,(NET.fly||0)-1);const t=(NET.ts||[]).shift();
-  if(t!=null){const rtt=performance.now()-t;NET.q=Math.max(.5,Math.min(.85,(NET.q||.8)+(rtt<60?.02:rtt>140?-.05:0)))}}
-function netClientRender(){
-  const c=ctx;c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,VW,canvas.height);
-  if(NET.img&&(NET.remote==='play'||NET.remote==='pause'||NET.remote==='result')){c.imageSmoothingEnabled=false;try{c.drawImage(NET.img,0,0,VW,canvas.height)}catch(e){}}
-  else{c.fillStyle='#0b0b1e';c.fillRect(0,0,VW,canvas.height)}}
+function netTick(){/* Tidak ada streaming JPEG: kedua perangkat menggambar simulasi lokal */
+  if(!NET.conn)return;
+  if(NET.role==='host'&&G&&(state==='play'||state==='pause'||state==='result')){
+    NET.frame++;
+    if(state==='result'&&NET.lastResultFrame!==NET.frame){NET.lastResultFrame=NET.frame;}
+  }}
+function netClientRender(){/* legacy fallback intentionally disabled */
+  const c=ctx;c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,VW,canvas.height);c.fillStyle='#0b0b1e';c.fillRect(0,0,VW,canvas.height)}
 function onEdgeFor(f,inp,a){if(state!=='play'||!G||G.phase!=='fight'||f.ai)return;if(a==='ult'){f.useUltimate();return}if(BTNS[a]){if((a==='lh'||a==='rh')&&inp.held.lh&&inp.held.rh&&!f.slamIntent()&&f.useUltimate())return;f.pressAttack(a)}else f.pressDir(a)}
 function onEdge(a){if(G)onEdgeFor(G.p,Input,a)}
 function onEdge2(a){if(G&&G.vs2)onEdgeFor(G.e,Input2,a)}
@@ -3415,8 +3431,7 @@ function mirrorCos(base){
 function startMatch(id,train,chosenFoe,story){
   selId=id;const foeId=chosenFoe&&CHARS[chosenFoe]?chosenFoe:foeOf(id);foeSelId=foeId;const mine=CHARS[id],mirror=foeId===id,foe=mirror?Object.assign(Object.create(Object.getPrototypeOf(CHARS[foeId])),CHARS[foeId],{name:CHARS[foeId].name+' 2'}):CHARS[foeId];
   WORLD_W=mapPick==='port'?PORT_W:720;
-  const matchSeed=((Date.now()>>>0)^((performance.now()*1000)>>>0)^((Math.random()*0xffffffff)>>>0))>>>0;seedRng(matchSeed);
-  G={seed:matchSeed,sel:id,foeSel:foeId,map:mapPick,crates:mapPick==='port'?makePortCrates():[],p:new Fighter(mine,true),e:new Fighter(foe,false),phase:'intro',introT:0,cT:0,cN:-1,fT:0,time:0,timer:60,round:1,score:[0,0],items:[],proj:[],movers:[],parts:[],shake:0,hitStop:0,cam:0,pop:null,koT:0,itemT:6,rw:null,koWhy:'',confT:0};
+  G={sel:id,foeSel:foeId,map:mapPick,crates:mapPick==='port'?makePortCrates():[],p:new Fighter(mine,true),e:new Fighter(foe,false),phase:'intro',introT:0,cT:0,cN:-1,fT:0,time:0,timer:60,round:1,score:[0,0],items:[],proj:[],movers:[],parts:[],shake:0,hitStop:0,cam:0,pop:null,koT:0,itemT:6,rw:null,koWhy:'',confT:0};
   if(mirror){if(lastPick==='me')G.p.co=mirrorCos(COS[id]);else G.e.co=mirrorCos(COS[id])}/* lawan diri sendiri: warna dibedakan */
   if(story){G.story=story;G.sdiff=story.diff}
   G.vs2=!!vs2p&&!train&&!story;if(G.vs2){G.e.ai=null;G.e.ctl=Input2.held}G.split=!!G.vs2&&!(NET.role==='host'&&NET.conn);/* V62: Player 2 menggantikan AI */
@@ -3424,6 +3439,17 @@ function startMatch(id,train,chosenFoe,story){
   if(train){G.train=true;G.auto=true;G.dummy='DIAM';G.dist=120;G.keepW=null;G.phase='fight';G.fT=0;G.p.ult=100;trainReset();refreshTrain();toast('MODE LATIHAN')}
   go('play');
 }
+const _startMatchCore=startMatch;
+startMatch=function(id,train,chosenFoe,story){
+  if(NET.role==='host'&&NET.conn){NET.seed=((Date.now()>>>0)^((performance.now()*1000)>>>0)^((Math.random()*0xffffffff)>>>0))>>>0;}
+  if(NET.role==='client'&&NET.seed)seedRng(NET.seed);
+  else if(NET.role==='host'&&NET.seed)seedRng(NET.seed);
+  _startMatchCore(id,train,chosenFoe,story);
+  if(NET.role==='host'&&NET.conn&&G){
+    G.split=false;
+    netSend('J'+JSON.stringify({t:'match',p1:id,p2:foeSelId,map:mapPick,seed:NET.seed,speed:S.speed}));
+  }
+};
 /* V12: 1 HIT KILL khusus Mode Latihan. Hanya dummy latihan (G.e) yang kalah oleh serangan pemain (G.p); tidak lewat endRound -> skor/ronde tidak tersentuh. */
 let trainOHK=false;
 function trainKill(t,att,dir){
@@ -4187,7 +4213,7 @@ function drawPortrait(cv,id,t,face,clean,alt){
   drawChar(c,{ch:CHARS[id],co:alt?mirrorCos(COS[id]):COS[id],x:w/2-2,y:h-(clean?12:14),face:face||1,pose:'idle',t,scale:2});
 }
 function render(){
-  if(NET.role==='client'&&state==='netplay'){netClientRender();return}
+  if(NET.role==='client'&&state==='netplay'){fitCanvas();ctx.clearRect(0,0,VW,canvas.height);ctx.fillStyle='#0b0b1e';ctx.fillRect(0,0,VW,canvas.height);return}
   fitCanvas();ctx.clearRect(0,0,VW,canvas.height);document.body.classList.toggle('cine',!!(G&&G.vz&&G.vz.k>.02&&state==='play'));/* sembunyikan kontrol sentuh saat sinematik */
   if(G&&(state==='play'||state==='pause'||state==='result'||(state==='settings'&&returnTo==='pause')))drawGame();
   else drawMenu();
@@ -4224,7 +4250,7 @@ function go(s){
   state=s;
   for(const n of SCREENS){const el=$('sc-'+n);if(el)el.classList.toggle('show',n===s)}
   if(s==='chapters'||s==='dialog'||s==='storylog')G=null;
-  document.body.classList.toggle('playing',s==='play');document.body.classList.toggle('twop',!!(G&&G.vs2&&NET.role!=='host'));document.body.classList.toggle('split',!!(G&&G.split));
+  document.body.classList.toggle('playing',s==='play');document.body.classList.toggle('twop',!!(G&&G.vs2&&NET.role!=='host'&&NET.role!=='client'));document.body.classList.toggle('split',!!(G&&G.split));
   document.body.classList.toggle('ctlprev',s==='settings'&&returnTo==='pause');
   $('pauseBtn').style.display=s==='play'?'flex':'none';
   $('trainBar').style.display=(s==='play'&&G&&G.train)?'flex':'none';
@@ -4687,19 +4713,15 @@ function resize(){
   for(const el of [canvas,ui]){el.style.left=l+'px';el.style.top=t+'px';el.style.width=cw+'px';el.style.height=ch+'px'}
   document.documentElement.style.setProperty('--u',(Math.floor(VH*sc)/100)+'px');document.documentElement.style.setProperty('--ptop',canvas.height>VH?Math.round((SH-22)*sc)+'px':'');checkOrient();
 }
-let last=0,simAccumulator=0;
-const SIM_DT=1/60,MAX_CATCHUP=5;
+let last=0,simAccumulator=0;const SIM_DT=1/60,MAX_CATCHUP=5;
 function loop(ts){
   requestAnimationFrame(loop);
-  if(last&&ts-last<10)return;/* V66: batasi ~60fps pada layar 120Hz */
+  if(last&&ts-last<10)return;
   const real=Math.min(.05,(ts-last)/1000||0);last=ts;menuT+=real;
   try{
     if(state==='play'||state==='result'){
       simAccumulator=Math.min(simAccumulator+real*S.speed,SIM_DT*MAX_CATCHUP);
-      let steps=0;
-      while(simAccumulator+1e-9>=SIM_DT&&steps<MAX_CATCHUP&&(state==='play'||state==='result')){
-        update(SIM_DT);simAccumulator-=SIM_DT;steps++;
-      }
+      let steps=0;while(simAccumulator+1e-9>=SIM_DT&&steps<MAX_CATCHUP&&(state==='play'||state==='result')){update(SIM_DT);simAccumulator-=SIM_DT;steps++;}
     }else simAccumulator=0;
     if(state==='dialog'&&dlg)dlgTick(real);
     syncWorld();syncCtrl();render();netTick();
