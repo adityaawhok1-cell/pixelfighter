@@ -32,6 +32,33 @@ jobs:
           if [ ! -d android ]; then npx cap add android; fi
           npx cap sync android
 
+      # Paksa LANDSCAPE penuh + fullscreen (tanpa bar sistem)
+      - name: Landscape & fullscreen
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's/<activity /<activity android:screenOrientation="sensorLandscape" /' $M
+          S=android/app/src/main/res/values/styles.xml
+          sed -i 's#<item name="windowActionBar">false</item>#<item name="windowActionBar">false</item><item name="android:windowFullscreen">true</item><item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>#' $S
+          F=$(find android/app/src/main/java -name MainActivity.java)
+          grep '^package' $F > /tmp/M.java
+          cat >> /tmp/M.java <<'JEOF'
+          import androidx.core.view.WindowCompat;
+          import androidx.core.view.WindowInsetsCompat;
+          import androidx.core.view.WindowInsetsControllerCompat;
+          import com.getcapacitor.BridgeActivity;
+          public class MainActivity extends BridgeActivity {
+            @Override public void onWindowFocusChanged(boolean hasFocus) {
+              super.onWindowFocusChanged(hasFocus);
+              if (hasFocus) {
+                WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+                c.hide(WindowInsetsCompat.Type.systemBars());
+                c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+              }
+            }
+          }
+          JEOF
+          cp /tmp/M.java $F
+
       # Kunci tanda tangan TETAP -> APK baru bisa menimpa yang lama tanpa uninstall
       - name: Pakai keystore tetap
         run: |
