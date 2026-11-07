@@ -1,8 +1,7 @@
 name: Build APK
-
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -20,7 +19,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Siapkan folder www
+      - name: Siapkan game
         run: |
           mkdir -p www
           cp index.html www/index.html
@@ -28,63 +27,30 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Add Android project
-        run: npx cap add android
-
-      - name: Landscape orientation
+      - name: Tambah platform Android
         run: |
-          sed -i 's/<activity/<activity android:screenOrientation="sensorLandscape"/' android/app/src/main/AndroidManifest.xml
+          if [ ! -d android ]; then npx cap add android; fi
+          npx cap sync android
 
-      - name: Layar penuh (tema)
+      # Kunci tanda tangan TETAP -> APK baru bisa menimpa yang lama tanpa uninstall
+      - name: Pakai keystore tetap
         run: |
-          S=android/app/src/main/res/values/styles.xml
-          sed -i 's#<item name="android:background">@null</item>#<item name="android:background">@android:color/black</item>\n        <item name="android:windowFullscreen">true</item>\n        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>#' $S
-          grep -q windowLayoutInDisplayCutoutMode $S || (echo "styles.xml tidak cocok"; cat $S; exit 1)
+          mkdir -p ~/.android
+          cp debug.keystore ~/.android/debug.keystore
 
-      - name: Layar penuh (sembunyikan bar sistem)
+      # Nomor versi naik otomatis tiap build
+      - name: Naikkan versionCode
         run: |
-          cat > android/app/src/main/java/com/pixelfighter/game/MainActivity.java <<'JAVA'
-          package com.pixelfighter.game;
+          sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" android/app/build.gradle
+          sed -i "s/versionName \"[^\"]*\"/versionName \"1.${{ github.run_number }}\"/" android/app/build.gradle
 
-          import android.os.Bundle;
-          import androidx.core.view.WindowCompat;
-          import androidx.core.view.WindowInsetsCompat;
-          import androidx.core.view.WindowInsetsControllerCompat;
-          import com.getcapacitor.BridgeActivity;
-
-          public class MainActivity extends BridgeActivity {
-            @Override
-            public void onCreate(Bundle savedInstanceState) {
-              super.onCreate(savedInstanceState);
-              goImmersive();
-            }
-
-            @Override
-            public void onWindowFocusChanged(boolean hasFocus) {
-              super.onWindowFocusChanged(hasFocus);
-              if (hasFocus) goImmersive();
-            }
-
-            private void goImmersive() {
-              WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-              WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-              c.hide(WindowInsetsCompat.Type.systemBars());
-              c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            }
-          }
-          JAVA
-
-      - name: Sync web files
-        run: npx cap sync android
-
-      - name: Build debug APK
+      - name: Build APK
+        working-directory: android
         run: |
-          cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: pixel-fighter-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
